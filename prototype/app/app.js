@@ -239,6 +239,24 @@ document.getElementById("openPlayerBtn").onclick=()=>{if(!state.project){alert("
 function slugName(s){return (s||"Bai_hoc").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"");}
 function refreshExportName(){document.getElementById("exportName").textContent=`${slugName(document.getElementById("lessonTitle").value)}_SCORM2004.zip`;loadExportHistory();}
 async function loadExportHistory(){const r=await fetch('/api/v1/exports');if(!r.ok)return;const items=await r.json();document.getElementById('exportHistory').innerHTML=items.length?items.map(x=>`<div>${escapeHtml(x.filename)} • ${x.byte_size} bytes • ${escapeHtml(x.status)}</div>`).join(''):'Chưa có lịch sử export.';}
+function renderQualityReport(report){
+  const target=document.getElementById('qualityReport'),summary=report.summary,findings=report.findings||[];
+  target.className='quality-report';
+  target.innerHTML=`<div class="quality-summary"><strong>Điểm sẵn sàng: ${Number(report.score)}/100</strong><span>${summary.warnings} cảnh báo • ${summary.info} gợi ý • ${summary.checked_slides} slide • ${summary.checked_questions} câu hỏi</span></div>${findings.length?`<div class="quality-findings">${findings.map(item=>`<article class="quality-finding ${escapeHtml(item.severity)}"><b>${item.severity==='warning'?'Cần xử lý':'Gợi ý'}</b><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p><small>${escapeHtml(item.suggestion)}</small></div></article>`).join('')}</div>`:'<p class="quality-clear">Không có cảnh báo. Giáo viên vẫn cần kiểm tra tính chính xác chuyên môn trước khi xuất.</p>'}`;
+}
+async function runQualityCheck(){
+  const target=document.getElementById('qualityReport'),button=document.getElementById('qualityCheckBtn');
+  if(!state.project||!state.generated){target.className='quality-report hint';target.textContent='Hãy tạo và lưu bài giảng trước khi kiểm tra.';return;}
+  button.disabled=true;button.textContent='Đang kiểm tra…';target.className='quality-report hint';target.textContent='Đang lưu và rà soát phiên bản hiện tại…';
+  try{
+    await persistGenerated();
+    const response=await fetch(`/api/v1/projects/${state.project.id}/quality-check`);
+    if(!response.ok)throw new Error((await apiMessage(response))||'Không thể kiểm tra chất lượng.');
+    renderQualityReport(await response.json());
+  }catch(error){target.className='quality-report error';target.textContent=error.message||'Không thể kiểm tra chất lượng.';}
+  finally{button.disabled=false;button.textContent='Kiểm tra chất lượng';}
+}
+document.getElementById('qualityCheckBtn').onclick=runQualityCheck;
 
 async function exportScorm(){
   const status=document.getElementById("exportStatus");

@@ -18,6 +18,7 @@ from prototype.providers import ProviderError, ProviderResult, provider_for
 from prototype.sources import extract_text, validate_upload
 from prototype.storage import Storage
 from prototype.logging_config import configure_logging
+from prototype.quality import analyze_course
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "app"
@@ -1005,6 +1006,16 @@ def preview_player(project_id: str, user: User = Depends(current_teacher), db: S
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found.")
     return HTMLResponse(build_course_html(export_request_from_course(Course.model_validate(project.course_json))))
+
+
+@app.get("/api/v1/projects/{project_id}/quality-check")
+@app.post("/api/v1/projects/{project_id}/quality-check")
+def quality_check(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    """Return deterministic, non-blocking authoring guidance for an owned project."""
+    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return analyze_course(Course.model_validate(project.course_json))
 
 @app.get("/")
 def home():

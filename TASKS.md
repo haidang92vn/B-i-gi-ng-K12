@@ -134,9 +134,9 @@ Acceptance:
 - [x] restore drill documentation.
 
 ## Milestone 12 — Quality & advanced features [P1/P2]
-- [ ] AI quality checker.
-- [ ] question quality checks.
-- [ ] slide text-density checks.
+- [x] AI quality checker.
+- [x] question quality checks.
+- [x] slide text-density checks.
 - [ ] media/TTS.
 - [ ] school/team accounts.
 - [ ] shared question library.

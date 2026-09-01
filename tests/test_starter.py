@@ -10,11 +10,12 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
-from prototype.course_models import Question
+from prototype.course_models import Block, Question, Slide, new_course
 from prototype.quiz_scoring import score_question
 from prototype.scorm_runtime import FakeScorm2004API, ScormRuntime
 from prototype.logging_config import redact
 from prototype.persistence import database_url
+from prototype.quality import analyze_course
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -61,6 +62,23 @@ class CourseContractTests(unittest.TestCase):
         self.assertEqual(api.GetValue("cmi.session_time"), "PT0H1M1S")
         self.assertTrue(api.terminated)
 
+    def test_quality_checker_identifies_fixable_slide_and_question_issues(self):
+        course = new_course("Kiểm tra chất lượng")
+        course.slides = [Slide(id="s1", title="Dày chữ", layout="content", status="ai_draft", blocks=[
+            Block(id="b1", type="text", text="Nội dung " * 150),
+        ])]
+        course.question_bank = [Question(
+            id="q1", type="multiple", question="Ngắn", selected=True, score=0,
+            difficulty="understand", correct_answer="A", options=["A", "A"],
+        )]
+        report = analyze_course(course)
+        codes = {item["code"] for item in report["findings"]}
+        self.assertFalse(report["blocking"])
+        self.assertIn("SLIDE_TEXT_VERY_DENSE", codes)
+        self.assertIn("SLIDE_NOT_REVIEWED", codes)
+        self.assertIn("QUESTION_OPTIONS_DUPLICATE", codes)
+        self.assertIn("QUESTION_MULTIPLE_ANSWER_FORMAT", codes)
+
 
 class PrototypeTests(unittest.TestCase):
     @classmethod
@@ -87,6 +105,16 @@ class PrototypeTests(unittest.TestCase):
         readiness = client.get("/readyz")
         self.assertEqual(readiness.status_code, 200, readiness.text)
         self.assertEqual(readiness.json()["dependencies"]["database"], "ok")
+
+    def test_owned_project_quality_endpoint_returns_advisory_report(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"quality-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        generated = client.post("/api/generate", json={"title": "Bài chất lượng", "source": "Một nội dung kiểm tra.", "provider": "mock"}).json()
+        project = client.post("/api/v1/projects", json={"title": "Bài chất lượng", "direction": "lesson", "course": generated["course"]}).json()
+        response = client.get(f"/api/v1/projects/{project['id']}/quality-check")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["course_id"], project["course"]["id"])
+        self.assertFalse(response.json()["blocking"])
 
     def test_log_redaction_hides_common_secret_shapes(self):
         line = redact("Authorization: Bearer secret-value Cookie: session=abc api_key=sk-123456789")

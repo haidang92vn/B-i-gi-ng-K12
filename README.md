@@ -125,6 +125,14 @@ the VPS release procedure and [docs/RESTORE_DRILL.md](docs/RESTORE_DRILL.md) for
 quarterly recovery drill. This ships the current FastAPI-served prototype UI; a production Next.js
 frontend and actual background-job handlers remain separate work.
 
+## Milestone 12.1: quality checks
+
+At the export step, Kiểm tra chất lượng saves the current draft and returns non-blocking,
+deterministic review guidance for AI-draft slides, text density, question structure, answers,
+duplicate items and learning-objective links. It does not spend AI-provider tokens and does not
+replace teacher subject-matter review or the technical SCORM validator. See
+[docs/QUALITY_CHECKS.md](docs/QUALITY_CHECKS.md).
+
 ## Cấu trúc repository thực tế
 
 ```text

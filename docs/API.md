@@ -50,7 +50,8 @@ POST /api/v1/projects/{project_id}/ai/storyboard
 POST /api/v1/projects/{project_id}/ai/questions
 POST /api/v1/projects/{project_id}/ai/regenerate-slide/{slide_id}
 POST /api/v1/projects/{project_id}/ai/regenerate-question/{question_id}
-POST /api/v1/projects/{project_id}/ai/quality-check
+GET  /api/v1/projects/{project_id}/quality-check
+POST /api/v1/projects/{project_id}/quality-check
 ```
 
 Long operations may return a job id instead of blocking the request.

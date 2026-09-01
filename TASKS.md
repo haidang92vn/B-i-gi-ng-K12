@@ -101,11 +101,11 @@ Acceptance:
 - no arbitrary authored script execution.
 
 ## Milestone 09 — Completion engine + SCORM runtime [P0]
-- [ ] Store completion policy in course model.
-- [ ] Implement SCORM 2004 runtime adapter.
-- [ ] Resume with location/suspend data.
-- [ ] Score/completion/success/session time tracking.
-- [ ] Runtime unit/integration test harness.
+- [x] Store completion policy in course model.
+- [x] Implement SCORM 2004 runtime adapter.
+- [x] Resume with location/suspend data.
+- [x] Score/completion/success/session time tracking.
+- [x] Runtime unit/integration test harness.
 
 Acceptance:
 - resume works in a SCORM test environment;

@@ -229,6 +229,7 @@ class ExportRequest(BaseModel):
     navigation_mode: Literal["free", "sequential", "restricted"] = "free"
     show_menu: bool = True
     primary_color: str | None = None
+    require_quiz: bool = True
 
 def compact_sentences(text: str):
     text = re.sub(r"\s+", " ", text or "").strip()
@@ -655,6 +656,14 @@ def scorm_manifest(title: str):
 def runtime_js():
     return r'''
 let API = null;
+let sessionStartedAt = 0;
+const runtimeAdapter = {
+  initialize(){ return API ? API.Initialize("") : "false"; },
+  get(key){ return API ? (API.GetValue(key) || "") : ""; },
+  set(key,value){ if(API) API.SetValue(key,String(value)); },
+  commit(){ if(API) API.Commit(""); },
+  terminate(){ if(API) API.Terminate(""); }
+};
 function findAPI(win) {
   let tries = 0;
   while (win && tries < 20) {
@@ -671,18 +680,22 @@ function scormInit(){
   API = findAPI(window);
   if (!API) return false;
   try {
-    API.Initialize("");
-    const status = API.GetValue("cmi.completion_status");
+    runtimeAdapter.initialize();
+    const status = runtimeAdapter.get("cmi.completion_status");
     if (!status || status === "unknown" || status === "not attempted") {
-      API.SetValue("cmi.completion_status","incomplete");
-      API.Commit("");
+      runtimeAdapter.set("cmi.completion_status","incomplete");
+      runtimeAdapter.commit();
     }
+    sessionStartedAt = Date.now();
     return true;
   } catch(e){ return false; }
 }
-function scormSet(k,v){ if(API){ try { API.SetValue(k,String(v)); API.Commit(""); } catch(e){} } }
-function scormGet(k){ if(API){ try { return API.GetValue(k) || ""; } catch(e){} } return ""; }
-function scormFinish(){ if(API){ try { API.Commit(""); API.Terminate(""); } catch(e){} } }
+function scormSet(k,v){ if(API){ try { runtimeAdapter.set(k,v); runtimeAdapter.commit(); } catch(e){} } }
+function scormGet(k){ if(API){ try { return runtimeAdapter.get(k); } catch(e){} } return ""; }
+function scormSuspend(state){ scormSet("cmi.suspend_data",JSON.stringify(state)); }
+function scormResume(){ try { return JSON.parse(scormGet("cmi.suspend_data")||"{}"); } catch(e){ return {}; } }
+function scormDuration(ms){ const seconds=Math.max(0,Math.floor(ms/1000)); return `PT${Math.floor(seconds/3600)}H${Math.floor(seconds%3600/60)}M${seconds%60}S`; }
+function scormFinish(){ if(API){ try { if(sessionStartedAt) runtimeAdapter.set("cmi.session_time",scormDuration(Date.now()-sessionStartedAt)); runtimeAdapter.commit(); runtimeAdapter.terminate(); } catch(e){} } }
 window.addEventListener("load", scormInit);
 window.addEventListener("beforeunload", scormFinish);
 '''
@@ -699,7 +712,7 @@ def export_request_from_course(course: Course) -> ExportRequest:
                           quiz_type=item.type, selected=item.selected) for item in course.question_bank],
         passing_score=course.completion.passing_score, completion_percent=course.completion.viewed_percent,
         resume=course.scorm.resume, navigation_mode=course.navigation.mode,
-        show_menu=course.navigation.show_menu, primary_color=course.theme.primary_color,
+        show_menu=course.navigation.show_menu, primary_color=course.theme.primary_color, require_quiz=course.completion.require_quiz,
     )
 
 
@@ -775,7 +788,7 @@ def build_course_html(req: ExportRequest):
         "quizCount": len(selected),
         "passing": req.passing_score,
         "completion": req.completion_percent,
-        "resume": req.resume, "navigationMode": req.navigation_mode, "showMenu": req.show_menu
+        "resume": req.resume, "navigationMode": req.navigation_mode, "showMenu": req.show_menu, "requireQuiz": req.require_quiz
     }
     answers = {q.id: q.answer for q in selected}
 
@@ -840,6 +853,7 @@ function show(i){{
   document.getElementById("prev").disabled = current===0;
   document.getElementById("next").disabled = current===slides.length-1;
   scormSet("cmi.location", current);
+  scormSuspend({{location:current,highestVisited}});
   const progress = Math.round(((current+1)/slides.length)*100);
   scormSet("cmi.progress_measure", progress/100);
   if(progress >= CFG.completion) scormSet("cmi.completion_status","completed");
@@ -873,7 +887,6 @@ function submitQuiz(){{
   scormSet("cmi.score.min", 0);
   scormSet("cmi.score.max", 100);
   scormSet("cmi.score.scaled", score/100);
-  scormSet("cmi.completion_status","completed");
   scormSet("cmi.success_status", score >= CFG.passing ? "passed" : "failed");
   document.getElementById("quizResult").textContent =
     `Kết quả: ${{score}}/100 — ${{score >= CFG.passing ? "Đạt" : "Chưa đạt"}}`;
@@ -882,7 +895,8 @@ function submitQuiz(){{
 window.addEventListener("load",()=>{{
   let resume = 0;
   if(CFG.resume){{
-    const loc = parseInt(scormGet("cmi.location") || "0",10);
+    const state=scormResume();
+    const loc = parseInt((state.location ?? scormGet("cmi.location") ?? "0"),10);
     if(!Number.isNaN(loc)) resume = loc;
   }}
   show(resume);

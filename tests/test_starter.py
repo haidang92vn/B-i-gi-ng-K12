@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 from prototype.course_models import Question
 from prototype.quiz_scoring import score_question
+from prototype.scorm_runtime import FakeScorm2004API, ScormRuntime
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,6 +40,22 @@ class CourseContractTests(unittest.TestCase):
         self.assertEqual(score_question(question("fill", "Quang hợp"), "quang HỢP"), (True, 2))
         self.assertEqual(score_question(question("matching", {"A": "1", "B": "2"}), {"b": "2", "a": "1"}), (True, 2))
         self.assertEqual(score_question(question("ordering", ["Một", "Hai"]), ["Hai", "Một"]), (False, 0.0))
+
+    def test_scorm_runtime_harness_keeps_completion_and_success_independent(self):
+        api = FakeScorm2004API()
+        runtime = ScormRuntime(api, completion_percent=90, passing_score=70)
+        runtime.initialize()
+        runtime.view_slide(location=7, total_slides=10)
+        self.assertEqual(api.GetValue("cmi.completion_status"), "incomplete")
+        runtime.submit_score(80)
+        self.assertEqual(api.GetValue("cmi.success_status"), "passed")
+        self.assertEqual(api.GetValue("cmi.completion_status"), "incomplete")
+        runtime.view_slide(location=9, total_slides=10)
+        self.assertEqual(runtime.resume(), {"location": 9})
+        self.assertEqual(api.GetValue("cmi.completion_status"), "completed")
+        runtime.finish(61)
+        self.assertEqual(api.GetValue("cmi.session_time"), "PT0H1M1S")
+        self.assertTrue(api.terminated)
 
 
 class PrototypeTests(unittest.TestCase):

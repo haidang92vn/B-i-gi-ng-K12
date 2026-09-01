@@ -237,7 +237,8 @@ function refreshPreview(){
 document.getElementById("openPlayerBtn").onclick=()=>{if(!state.project){alert("Hãy tạo và lưu bản nháp bài giảng trước.");return;}window.open(`/api/v1/projects/${state.project.id}/player`,"_blank","noopener");};
 
 function slugName(s){return (s||"Bai_hoc").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"");}
-function refreshExportName(){document.getElementById("exportName").textContent=`${slugName(document.getElementById("lessonTitle").value)}_SCORM2004.zip`;}
+function refreshExportName(){document.getElementById("exportName").textContent=`${slugName(document.getElementById("lessonTitle").value)}_SCORM2004.zip`;loadExportHistory();}
+async function loadExportHistory(){const r=await fetch('/api/v1/exports');if(!r.ok)return;const items=await r.json();document.getElementById('exportHistory').innerHTML=items.length?items.map(x=>`<div>${escapeHtml(x.filename)} • ${x.byte_size} bytes • ${escapeHtml(x.status)}</div>`).join(''):'Chưa có lịch sử export.';}
 
 async function exportScorm(){
   const status=document.getElementById("exportStatus");
@@ -251,7 +252,8 @@ async function exportScorm(){
     quizzes:state.generated.quizzes,
     passing_score:Number(document.getElementById("passingScore").value||70),
     completion_percent:Number(document.getElementById("completionPercent").value||90),
-    resume:document.getElementById("resumeToggle").checked
+    resume:document.getElementById("resumeToggle").checked,
+    project_id:state.project?.id||null
   };
   status.textContent="Đang tạo gói SCORM 2004...";
   try{
@@ -264,7 +266,7 @@ async function exportScorm(){
     const a=document.createElement("a");
     const url=URL.createObjectURL(blob);a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),2000);
-    status.textContent=`Đã tạo ${name}. Có thể kiểm thử rồi upload lên K12Online.`;
+    status.textContent=`Đã tạo ${name}. Có thể kiểm thử rồi upload lên K12Online.`;loadExportHistory();
   }catch(e){status.textContent=e.message;}
 }
 document.getElementById("exportBtn").onclick=exportScorm;

@@ -112,12 +112,12 @@ Acceptance:
 - completion and success are independently correct.
 
 ## Milestone 10 — SCORM packager + validator + K12 preset [P0]
-- [ ] Build manifest.
-- [ ] Package all assets.
-- [ ] Validate references and root structure.
-- [ ] K12Online preset.
-- [ ] Export history stored in DB/R2.
-- [ ] Manual compatibility test checklist.
+- [x] Build manifest.
+- [x] Package all assets.
+- [x] Validate references and root structure.
+- [x] K12Online preset.
+- [x] Export history stored in DB/R2.
+- [x] Manual compatibility test checklist.
 
 Acceptance:
 - invalid package cannot be exported as “ready”;

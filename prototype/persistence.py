@@ -107,6 +107,19 @@ class GenerationRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ExportRecord(Base):
+    __tablename__ = "export_records"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("projects.id"), nullable=True, index=True)
+    filename: Mapped[str] = mapped_column(String(300))
+    storage_key: Mapped[str] = mapped_column(String(700), unique=True)
+    byte_size: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="ready")
+    validation_json: Mapped[dict] = mapped_column(JsonDocument, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 def make_session_factory(url: str | None = None):
     selected_url = url or database_url()
     connect_args = {"check_same_thread": False} if selected_url.startswith("sqlite") else {}

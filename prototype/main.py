@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from prototype.course_models import Course, Slide, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
 from prototype.credentials import decrypt, encrypt
-from prototype.persistence import AICredential, AuthSession, GenerationRun, Project, SourceMaterial, User, create_schema, make_session_factory
+from prototype.persistence import AICredential, AuthSession, ExportRecord, GenerationRun, Project, SourceMaterial, User, create_schema, make_session_factory
 from prototype.providers import ProviderError, ProviderResult, provider_for
 from prototype.sources import extract_text, validate_upload
 from prototype.storage import Storage
@@ -231,6 +231,7 @@ class ExportRequest(BaseModel):
     show_menu: bool = True
     primary_color: str | None = None
     require_quiz: bool = True
+    project_id: str | None = None
 
 def compact_sentences(text: str):
     text = re.sub(r"\s+", " ", text or "").strip()
@@ -940,7 +941,7 @@ window.addEventListener("load",()=>{{
 </html>'''
 
 @app.post("/api/export-scorm")
-def export_scorm(req: ExportRequest):
+def export_scorm(req: ExportRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
     files = {"imsmanifest.xml": scorm_manifest(req.title).encode(), "index.html": build_course_html(req).encode(), "runtime.js": runtime_js().encode()}
     errors = validate_scorm_package(files, passing_score=req.passing_score, completion_percent=req.completion_percent)
     if errors:
@@ -948,13 +949,26 @@ def export_scorm(req: ExportRequest):
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
         for name, content in files.items(): z.writestr(name, content)
-    mem.seek(0)
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", req.title).strip("_") or "bai_giang"
+    filename = f"{safe}_SCORM2004.zip"
+    package = mem.getvalue()
+    if req.project_id and db.scalar(select(Project.id).where(Project.id == req.project_id, Project.owner_user_id == user.id)) is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    storage_key = f"users/{user.id}/exports/{__import__('uuid').uuid4()}-{filename}"
+    storage.put(storage_key, package, "application/zip")
+    record = ExportRecord(user_id=user.id, project_id=req.project_id, filename=filename, storage_key=storage_key, byte_size=len(package), validation_json={"errors": []})
+    db.add(record); db.commit()
+    mem.seek(0)
     return StreamingResponse(
         mem,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{safe}_SCORM2004.zip"'}
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "X-Export-Id": record.id}
     )
+
+
+@app.get("/api/v1/exports")
+def list_exports(user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    return [{"id": item.id, "project_id": item.project_id, "filename": item.filename, "byte_size": item.byte_size, "status": item.status, "created_at": item.created_at} for item in db.scalars(select(ExportRecord).where(ExportRecord.user_id == user.id).order_by(ExportRecord.created_at.desc())).all()]
 
 
 @app.get("/api/v1/projects/{project_id}/player", response_class=HTMLResponse)

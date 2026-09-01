@@ -15,6 +15,12 @@
 ## Authorization
 Every project/file/export/credential endpoint must verify ownership or authorized membership server-side. Never trust a user_id supplied by the browser.
 
+School membership is explicit and is managed only by a school admin. A project owner may share a
+project only with a registered teacher who belongs to at least one common school; the API checks
+this relationship on every grant. `viewer` access never permits course mutation or source upload,
+and a missing grant is intentionally represented as `404` to avoid disclosing another teacher's
+project.
+
 ## Files
 - Restrict allowed file types and sizes.
 - Generate server-side object keys; do not trust raw filenames as paths.

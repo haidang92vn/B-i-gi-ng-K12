@@ -33,7 +33,7 @@
   <main>
     <header class="topbar">
       <div><span class="eyebrow">WORKFLOW DEMO</span><h1 id="pageTitle">Nhập nội dung bài học</h1></div>
-      <div class="status"><button class="ghost" id="credentialsBtn">AI API</button> <button class="ghost" id="libraryBtn">Bài giảng của tôi</button> <span class="dot"></span> Demo cục bộ</div>
+      <div class="status"><button class="ghost" id="credentialsBtn">AI API</button> <button class="ghost" id="schoolBtn">Nhóm trường</button> <button class="ghost" id="libraryBtn">Bài giảng của tôi</button> <span class="dot"></span> Demo cục bộ</div>
     </header>
 
     <section class="workspace">
@@ -139,6 +139,7 @@
 </div>
 <aside id="libraryDrawer" class="library-drawer"><div class="library-head"><h2>Bài giảng của tôi</h2><button class="ghost" id="closeLibraryBtn">Đóng</button></div><button class="primary" id="newLessonBtn">Bài giảng mới</button><div id="libraryList"></div></aside>
 <aside id="credentialsDrawer" class="library-drawer"><div class="library-head"><h2>API AI của tôi</h2><button class="ghost" id="closeCredentialsBtn">Đóng</button></div><form id="credentialForm"><label>Provider<select id="credentialProvider"><option value="openai">OpenAI (ChatGPT)</option><option value="gemini">Google Gemini</option></select></label><label>API key<input id="credentialSecret" type="password" required></label><label>Model mặc định<input id="credentialModel" placeholder="Tùy chọn"></label><button class="primary">Lưu key mã hóa</button></form><div id="credentialsList"></div></aside>
-<script src="app.js?v=quality-1"></script>
+<aside id="schoolDrawer" class="library-drawer"><div class="library-head"><h2>Nhóm trường</h2><button class="ghost" id="closeSchoolBtn">Đóng</button></div><p class="hint">Quản trị trường thêm giáo viên đã có tài khoản; chủ bài giảng chỉ chia sẻ cho đồng nghiệp cùng trường.</p><form id="schoolForm"><label>Tên trường/nhóm<input id="schoolName" required maxlength="200" placeholder="Ví dụ: THCS Nguyễn Du"></label><button class="primary">Tạo nhóm trường</button></form><div id="schoolList" class="hint">Đang tải nhóm trường…</div><form id="schoolMemberForm"><label>Email giáo viên<input id="schoolMemberEmail" type="email" required placeholder="giaovien@truong.edu.vn"></label><label>Vai trò<select id="schoolMemberRole"><option value="teacher">Giáo viên</option><option value="school_admin">Quản trị trường</option></select></label><button class="primary">Thêm / cập nhật thành viên</button></form><div id="schoolMembers" class="hint">Chọn một nhóm trường để xem thành viên.</div></aside>
+<script src="app.js?v=teams-1"></script>
 </body>
 </html>

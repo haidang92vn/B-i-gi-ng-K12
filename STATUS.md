@@ -30,6 +30,7 @@ architecture. It is **not yet the production application**.
 - SCORM export validates manifest, root files, launch resource, runtime and configuration before packaging. Ready packages are stored in R2-compatible storage with per-teacher export metadata; manual K12Online/SCORM Cloud verification uses `docs/LMS_COMPATIBILITY_TEST.md`.
 - Production deployment artifacts include a Caddy HTTPS reverse proxy, FastAPI API, Redis, PostgreSQL, an explicit Alembic migration job, a reserved Redis worker and a daily encrypted PostgreSQL backup service to a separate R2 bucket. Liveness/readiness endpoints, structured secret-redacted logs, monitoring guidance and a quarterly restore drill are documented in `docs/DEPLOYMENT.md` and `docs/RESTORE_DRILL.md`.
 - The export step includes a deterministic, non-blocking quality check over canonical course data. It flags AI-draft slides, text density, question stem/options/answer structure, duplicates, zero-score quiz questions and missing objective links without calling an AI provider or replacing the SCORM technical gate.
+- School teams support explicit school administrators and teacher members. Project owners can share a lesson only with a registered teacher in a common school, as `viewer` or `editor`; the prototype UI locks viewer editing while retaining player, quality-check and SCORM-export access.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 
@@ -39,6 +40,6 @@ architecture. It is **not yet the production application**.
 - Full quiz renderers for matching/ordering/drag-drop/image interactions.
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
 - A production Next.js frontend and actual background-job handlers (the current Compose worker only validates Redis connectivity).
-- Media/TTS, school/team accounts, a shared question library and analytics.
+- Media/TTS, a shared question library and analytics.
 
 Follow `TASKS.md` and the numbered files in `prompts/` to implement these in order.

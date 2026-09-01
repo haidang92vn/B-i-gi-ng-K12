@@ -24,6 +24,23 @@ DELETE /api/v1/projects/{project_id}
 
 For course updates, require revision/precondition handling to avoid silent overwrite from two tabs.
 
+## School teams and project sharing
+```text
+GET    /api/v1/schools
+POST   /api/v1/schools
+GET    /api/v1/schools/{school_id}/members
+PUT    /api/v1/schools/{school_id}/members
+DELETE /api/v1/schools/{school_id}/members/{user_id}
+
+GET    /api/v1/projects/{project_id}/shares
+PUT    /api/v1/projects/{project_id}/shares
+DELETE /api/v1/projects/{project_id}/shares/{user_id}
+```
+
+School admins manage membership. Project owners can share only with a registered teacher in a
+shared school team, with `viewer` or `editor` access. Readers receive no ownership-changing
+endpoints; unauthorized access is returned as `404`.
+
 ## Source files
 ```text
 POST   /api/v1/projects/{project_id}/sources

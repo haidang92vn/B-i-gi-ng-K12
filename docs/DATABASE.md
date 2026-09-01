@@ -41,6 +41,34 @@ prototype runs may use SQLite only; production must set `DATABASE_URL` to Postgr
 - created_at
 - updated_at
 
+## schools
+- id
+- name (unique)
+- created_by_user_id
+- created_at
+- updated_at
+
+## school_memberships
+- id
+- school_id
+- user_id
+- role: school_admin / teacher
+- created_at
+
+The `(school_id, user_id)` pair is unique. The API prevents removing the last `school_admin`.
+
+## project_shares
+- id
+- project_id
+- user_id
+- access_level: viewer / editor
+- granted_by_user_id
+- created_at
+- updated_at
+
+The `(project_id, user_id)` pair is unique. A share supplements, rather than replaces, the
+project owner relationship.
+
 ## project_versions
 Optional but recommended once autosave/editor is stable.
 - id

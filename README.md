@@ -133,6 +133,14 @@ duplicate items and learning-objective links. It does not spend AI-provider toke
 replace teacher subject-matter review or the technical SCORM validator. See
 [docs/QUALITY_CHECKS.md](docs/QUALITY_CHECKS.md).
 
+## Milestone 12.2: school teams and sharing
+
+For a school with around 80 teachers, each person keeps an individual account and a school
+administrator explicitly creates the school team, then adds already registered teachers by email.
+The owner can share a lesson only with a teacher in a common school, choosing **Chỉ xem** or
+**Có thể chỉnh sửa**. Viewers can preview, quality-check and export a SCORM copy but cannot alter
+the lesson or upload source files. See [docs/TEAMS.md](docs/TEAMS.md).
+
 ## Cấu trúc repository thực tế
 
 ```text

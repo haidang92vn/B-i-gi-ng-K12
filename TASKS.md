@@ -138,6 +138,6 @@ Acceptance:
 - [x] question quality checks.
 - [x] slide text-density checks.
 - [ ] media/TTS.
-- [ ] school/team accounts.
+- [x] school/team accounts.
 - [ ] shared question library.
 - [ ] analytics.

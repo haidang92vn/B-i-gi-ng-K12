@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from prototype.course_models import Course, Slide, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
 from prototype.credentials import decrypt, encrypt
-from prototype.persistence import AICredential, AuthSession, ExportRecord, GenerationRun, Project, SourceMaterial, User, create_schema, make_session_factory
+from prototype.persistence import AICredential, AuthSession, ExportRecord, GenerationRun, Project, ProjectShare, School, SchoolMembership, SourceMaterial, User, create_schema, make_session_factory
 from prototype.providers import ProviderError, ProviderResult, provider_for
 from prototype.sources import extract_text, validate_upload
 from prototype.storage import Storage
@@ -98,6 +98,40 @@ class TeacherResponse(BaseModel):
     full_name: str | None
     school_name: str | None
 
+
+class SchoolCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+
+
+class SchoolResponse(BaseModel):
+    id: str
+    name: str
+    role: Literal["school_admin", "teacher"]
+
+
+class SchoolMemberRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    role: Literal["school_admin", "teacher"] = "teacher"
+
+
+class SchoolMemberResponse(BaseModel):
+    user_id: str
+    email: str
+    full_name: str | None
+    role: Literal["school_admin", "teacher"]
+
+
+class ProjectShareRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    access_level: Literal["viewer", "editor"]
+
+
+class ProjectShareResponse(BaseModel):
+    user_id: str
+    email: str
+    full_name: str | None
+    access_level: Literal["viewer", "editor"]
+
 class SourceResponse(BaseModel):
     id: str; original_name: str; mime_type: str; byte_size: int; extracted_text: str | None
 class CredentialCreateRequest(BaseModel):
@@ -127,17 +161,51 @@ class ProjectResponse(BaseModel):
     status: str
     revision: int
     course: Course
+    access_level: Literal["owner", "viewer", "editor"] = "owner"
 
 
-def serialize_project(project: Project) -> ProjectResponse:
+def serialize_project(project: Project, access_level: Literal["owner", "viewer", "editor"] = "owner") -> ProjectResponse:
     return ProjectResponse(
         id=project.id, title=project.title, status=project.status,
-        revision=project.revision, course=Course.model_validate(project.course_json),
+        revision=project.revision, course=Course.model_validate(project.course_json), access_level=access_level,
     )
 
 
 def serialize_teacher(user: User) -> TeacherResponse:
     return TeacherResponse(id=user.id, email=user.email, full_name=user.full_name, school_name=user.school_name)
+
+
+def membership_for(db: Session, school_id: str, user_id: str) -> SchoolMembership | None:
+    return db.scalar(select(SchoolMembership).where(SchoolMembership.school_id == school_id, SchoolMembership.user_id == user_id))
+
+
+def require_school_admin(db: Session, school_id: str, user: User) -> SchoolMembership:
+    membership = membership_for(db, school_id, user.id)
+    if membership is None or membership.role != "school_admin":
+        raise HTTPException(status_code=403, detail="School administrator permission required.")
+    return membership
+
+
+def shared_school_ids(db: Session, first_user_id: str, second_user_id: str) -> set[str]:
+    first = set(db.scalars(select(SchoolMembership.school_id).where(SchoolMembership.user_id == first_user_id)).all())
+    second = set(db.scalars(select(SchoolMembership.school_id).where(SchoolMembership.user_id == second_user_id)).all())
+    return first & second
+
+
+def project_with_access(db: Session, project_id: str, user: User, *, require_edit: bool = False) -> tuple[Project, Literal["owner", "viewer", "editor"]]:
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if project.owner_user_id == user.id:
+        return project, "owner"
+    share = db.scalar(select(ProjectShare).where(ProjectShare.project_id == project_id, ProjectShare.user_id == user.id))
+    if share is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if not shared_school_ids(db, project.owner_user_id, user.id):
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if require_edit and share.access_level != "editor":
+        raise HTTPException(status_code=403, detail="Edit permission required for this project.")
+    return project, share.access_level  # type: ignore[return-value]
 
 
 @app.post("/api/v1/auth/register", response_model=TeacherResponse, status_code=status.HTTP_201_CREATED)
@@ -191,6 +259,76 @@ def refresh_session(response: Response, session_token: str | None = Cookie(defau
 @app.get("/api/v1/me", response_model=TeacherResponse)
 def me(user: User = Depends(current_teacher)):
     return serialize_teacher(user)
+
+
+@app.get("/api/v1/schools", response_model=list[SchoolResponse])
+def list_schools(user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    memberships = db.scalars(select(SchoolMembership).where(SchoolMembership.user_id == user.id)).all()
+    result: list[SchoolResponse] = []
+    for membership in memberships:
+        school = db.get(School, membership.school_id)
+        if school is not None:
+            result.append(SchoolResponse(id=school.id, name=school.name, role=membership.role))
+    return result
+
+
+@app.post("/api/v1/schools", response_model=SchoolResponse, status_code=status.HTTP_201_CREATED)
+def create_school(payload: SchoolCreateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    name = " ".join(payload.name.split())
+    if db.scalar(select(School.id).where(School.name == name)) is not None:
+        raise HTTPException(status_code=409, detail="A school with this name already exists.")
+    school = School(name=name, created_by_user_id=user.id)
+    db.add(school)
+    db.flush()
+    db.add(SchoolMembership(school_id=school.id, user_id=user.id, role="school_admin"))
+    db.commit()
+    return SchoolResponse(id=school.id, name=school.name, role="school_admin")
+
+
+@app.get("/api/v1/schools/{school_id}/members", response_model=list[SchoolMemberResponse])
+def list_school_members(school_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    if membership_for(db, school_id, user.id) is None:
+        raise HTTPException(status_code=404, detail="School not found.")
+    memberships = db.scalars(select(SchoolMembership).where(SchoolMembership.school_id == school_id)).all()
+    result: list[SchoolMemberResponse] = []
+    for membership in memberships:
+        member = db.get(User, membership.user_id)
+        if member is not None:
+            result.append(SchoolMemberResponse(user_id=member.id, email=member.email, full_name=member.full_name, role=membership.role))
+    return result
+
+
+@app.put("/api/v1/schools/{school_id}/members", response_model=SchoolMemberResponse)
+def add_or_update_school_member(school_id: str, payload: SchoolMemberRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    require_school_admin(db, school_id, user)
+    if db.get(School, school_id) is None:
+        raise HTTPException(status_code=404, detail="School not found.")
+    member = db.scalar(select(User).where(User.email == normalise_email(payload.email)))
+    if member is None:
+        raise HTTPException(status_code=404, detail="Teacher must register an account before being added to a school.")
+    membership = membership_for(db, school_id, member.id)
+    if membership is None:
+        membership = SchoolMembership(school_id=school_id, user_id=member.id, role=payload.role)
+        db.add(membership)
+    else:
+        membership.role = payload.role
+    db.commit()
+    return SchoolMemberResponse(user_id=member.id, email=member.email, full_name=member.full_name, role=membership.role)
+
+
+@app.delete("/api/v1/schools/{school_id}/members/{member_user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_school_member(school_id: str, member_user_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    require_school_admin(db, school_id, user)
+    membership = membership_for(db, school_id, member_user_id)
+    if membership is None:
+        raise HTTPException(status_code=404, detail="School member not found.")
+    if membership.role == "school_admin":
+        admin_count = len(db.scalars(select(SchoolMembership.id).where(SchoolMembership.school_id == school_id, SchoolMembership.role == "school_admin")).all())
+        if admin_count <= 1:
+            raise HTTPException(status_code=409, detail="A school must retain at least one administrator.")
+    db.delete(membership)
+    db.commit()
+
 
 def credential_response(item: AICredential) -> CredentialResponse:
     return CredentialResponse(id=item.id, provider=item.provider, label=item.label, secret_last4=item.secret_last4, model_default=item.model_default, status=item.status)
@@ -504,9 +642,7 @@ Giữ nguyên id slide {slide.id!r}; đặt status là ai_draft; có ít nhất 
 
 @app.post("/api/v1/projects/{project_id}/slides/{slide_id}/regenerate", response_model=ProjectResponse)
 def regenerate_slide(project_id: str, slide_id: str, payload: RegenerateSlideRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
-    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found.")
+    project, _ = project_with_access(db, project_id, user, require_edit=True)
     if project.revision != payload.expected_revision:
         raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
     course = Course.model_validate(project.course_json)
@@ -525,7 +661,7 @@ def regenerate_slide(project_id: str, slide_id: str, payload: RegenerateSlideReq
             raise HTTPException(status_code=502, detail="Không thể gọi AI. Hãy kiểm tra API key, model và hạn mức rồi thử lại.") from exc
     course.slides[index] = regenerated
     course.revision = payload.expected_revision + 1
-    result = db.execute(update(Project).where(Project.id == project_id, Project.owner_user_id == user.id, Project.revision == payload.expected_revision).values(
+    result = db.execute(update(Project).where(Project.id == project_id, Project.revision == payload.expected_revision).values(
         course_json=course.model_dump(mode="json"), revision=course.revision, schema_version=course.schema_version,
     ))
     if result.rowcount != 1:
@@ -538,15 +674,20 @@ def regenerate_slide(project_id: str, slide_id: str, payload: RegenerateSlideReq
 
 @app.get("/api/v1/projects", response_model=list[ProjectResponse])
 def list_projects(user: User = Depends(current_teacher), db: Session = Depends(get_db)):
-    """List only the current demo teacher's projects.
-
-    Milestone 02 replaces this fixed demo identity with authenticated user
-    resolution; callers never supply an owner id themselves.
-    """
-    projects = db.scalars(
-        select(Project).where(Project.owner_user_id == user.id).order_by(Project.updated_at.desc())
+    owned = db.scalars(select(Project).where(Project.owner_user_id == user.id).order_by(Project.updated_at.desc())).all()
+    shared = db.execute(
+        select(Project, ProjectShare.access_level)
+        .join(ProjectShare, ProjectShare.project_id == Project.id)
+        .where(ProjectShare.user_id == user.id)
+        .order_by(Project.updated_at.desc())
     ).all()
-    return [serialize_project(project) for project in projects]
+    projects = [(project, "owner") for project in owned] + [
+        (project, share.access_level)
+        for project, share in shared
+        if shared_school_ids(db, project.owner_user_id, user.id)
+    ]
+    projects.sort(key=lambda item: item[0].updated_at or __import__("datetime").datetime.min, reverse=True)
+    return [serialize_project(project, access) for project, access in projects]
 
 
 @app.post("/api/v1/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -577,14 +718,61 @@ def create_project(payload: ProjectCreateRequest, user: User = Depends(current_t
 
 @app.get("/api/v1/projects/{project_id}", response_model=ProjectResponse)
 def get_project(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project, access = project_with_access(db, project_id, user)
+    return serialize_project(project, access)
+
+
+@app.get("/api/v1/projects/{project_id}/shares", response_model=list[ProjectShareResponse])
+def list_project_shares(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
     project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found.")
-    return serialize_project(project)
+    shares = db.scalars(select(ProjectShare).where(ProjectShare.project_id == project.id)).all()
+    result: list[ProjectShareResponse] = []
+    for share in shares:
+        teacher = db.get(User, share.user_id)
+        if teacher is not None:
+            result.append(ProjectShareResponse(user_id=teacher.id, email=teacher.email, full_name=teacher.full_name, access_level=share.access_level))
+    return result
+
+
+@app.put("/api/v1/projects/{project_id}/shares", response_model=ProjectShareResponse)
+def add_or_update_project_share(project_id: str, payload: ProjectShareRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    teacher = db.scalar(select(User).where(User.email == normalise_email(payload.email)))
+    if teacher is None:
+        raise HTTPException(status_code=404, detail="Teacher account not found.")
+    if teacher.id == user.id:
+        raise HTTPException(status_code=422, detail="Project owners already have full access.")
+    if not shared_school_ids(db, user.id, teacher.id):
+        raise HTTPException(status_code=422, detail="Projects can only be shared with a teacher in the same school.")
+    share = db.scalar(select(ProjectShare).where(ProjectShare.project_id == project_id, ProjectShare.user_id == teacher.id))
+    if share is None:
+        share = ProjectShare(project_id=project_id, user_id=teacher.id, access_level=payload.access_level, granted_by_user_id=user.id)
+        db.add(share)
+    else:
+        share.access_level = payload.access_level
+        share.granted_by_user_id = user.id
+    db.commit()
+    return ProjectShareResponse(user_id=teacher.id, email=teacher.email, full_name=teacher.full_name, access_level=share.access_level)
+
+
+@app.delete("/api/v1/projects/{project_id}/shares/{shared_user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_project_share(project_id: str, shared_user_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    if db.scalar(select(Project.id).where(Project.id == project_id, Project.owner_user_id == user.id)) is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    share = db.scalar(select(ProjectShare).where(ProjectShare.project_id == project_id, ProjectShare.user_id == shared_user_id))
+    if share is None:
+        raise HTTPException(status_code=404, detail="Project share not found.")
+    db.delete(share)
+    db.commit()
 
 
 @app.patch("/api/v1/projects/{project_id}", response_model=ProjectResponse)
 def update_project(project_id: str, payload: ProjectUpdateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project_with_access(db, project_id, user, require_edit=True)
     if payload.course.id != project_id:
         raise HTTPException(status_code=422, detail="course.id must match the project id.")
     if payload.course.revision != payload.expected_revision + 1:
@@ -594,7 +782,6 @@ def update_project(project_id: str, payload: ProjectUpdateRequest, user: User = 
         update(Project)
         .where(
             Project.id == project_id,
-            Project.owner_user_id == user.id,
             Project.revision == payload.expected_revision,
         )
         .values(
@@ -606,7 +793,7 @@ def update_project(project_id: str, payload: ProjectUpdateRequest, user: User = 
     )
     if result.rowcount != 1:
         db.rollback()
-        existing = db.scalar(select(Project.id).where(Project.id == project_id, Project.owner_user_id == user.id))
+        existing = db.get(Project, project_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Project not found.")
         raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
@@ -638,8 +825,7 @@ def delete_project(project_id: str, user: User = Depends(current_teacher), db: S
 
 @app.post("/api/v1/projects/{project_id}/sources", response_model=SourceResponse, status_code=status.HTTP_201_CREATED)
 async def upload_source(project_id: str, upload: UploadFile = File(...), user: User = Depends(current_teacher), db: Session = Depends(get_db)):
-    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
-    if project is None: raise HTTPException(status_code=404, detail="Project not found.")
+    project, _ = project_with_access(db, project_id, user, require_edit=True)
     content = await upload.read()
     try: validate_upload(upload.filename or "", upload.content_type or "", content)
     except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -652,7 +838,8 @@ async def upload_source(project_id: str, upload: UploadFile = File(...), user: U
 
 @app.get("/api/v1/projects/{project_id}/sources", response_model=list[SourceResponse])
 def list_sources(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
-    return [SourceResponse(id=x.id, original_name=x.original_name, mime_type=x.mime_type, byte_size=x.byte_size, extracted_text=x.extracted_text) for x in db.scalars(select(SourceMaterial).where(SourceMaterial.project_id == project_id, SourceMaterial.user_id == user.id)).all()]
+    project_with_access(db, project_id, user)
+    return [SourceResponse(id=x.id, original_name=x.original_name, mime_type=x.mime_type, byte_size=x.byte_size, extracted_text=x.extracted_text) for x in db.scalars(select(SourceMaterial).where(SourceMaterial.project_id == project_id)).all()]
 
 def scorm_manifest(title: str):
     safe_title = html.escape(title)
@@ -981,8 +1168,8 @@ def export_scorm(req: ExportRequest, user: User = Depends(current_teacher), db: 
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", req.title).strip("_") or "bai_giang"
     filename = f"{safe}_SCORM2004.zip"
     package = mem.getvalue()
-    if req.project_id and db.scalar(select(Project.id).where(Project.id == req.project_id, Project.owner_user_id == user.id)) is None:
-        raise HTTPException(status_code=404, detail="Project not found.")
+    if req.project_id:
+        project_with_access(db, req.project_id, user)
     storage_key = f"users/{user.id}/exports/{__import__('uuid').uuid4()}-{filename}"
     storage.put(storage_key, package, "application/zip")
     record = ExportRecord(user_id=user.id, project_id=req.project_id, filename=filename, storage_key=storage_key, byte_size=len(package), validation_json={"errors": []})
@@ -1002,19 +1189,15 @@ def list_exports(user: User = Depends(current_teacher), db: Session = Depends(ge
 
 @app.get("/api/v1/projects/{project_id}/player", response_class=HTMLResponse)
 def preview_player(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
-    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found.")
+    project, _ = project_with_access(db, project_id, user)
     return HTMLResponse(build_course_html(export_request_from_course(Course.model_validate(project.course_json))))
 
 
 @app.get("/api/v1/projects/{project_id}/quality-check")
 @app.post("/api/v1/projects/{project_id}/quality-check")
 def quality_check(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
-    """Return deterministic, non-blocking authoring guidance for an owned project."""
-    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found.")
+    """Return deterministic, non-blocking authoring guidance for an accessible project."""
+    project, _ = project_with_access(db, project_id, user)
     return analyze_course(Course.model_validate(project.course_json))
 
 @app.get("/")

@@ -279,7 +279,48 @@ class PrototypeTests(unittest.TestCase):
         })
         forbidden = other_client.get(f"/api/v1/projects/{project['id']}")
         self.assertEqual(forbidden.status_code, 404, forbidden.text)
-        self.assertEqual(other_client.get(f"/api/v1/projects/{project['id']}/sources").json(), [])
+        self.assertEqual(other_client.get(f"/api/v1/projects/{project['id']}/sources").status_code, 404)
+
+    def test_school_admin_can_share_view_or_edit_access_only_with_school_members(self):
+        admin = TestClient(self.module.app)
+        collaborator = TestClient(self.module.app)
+        outsider = TestClient(self.module.app)
+        admin_email = f"admin-{uuid4()}@example.test"
+        collaborator_email = f"teacher-{uuid4()}@example.test"
+        outsider_email = f"outsider-{uuid4()}@example.test"
+        for client, email in ((admin, admin_email), (collaborator, collaborator_email), (outsider, outsider_email)):
+            response = client.post("/api/v1/auth/register", json={"email": email, "password": "a-secure-test-password"})
+            self.assertEqual(response.status_code, 201, response.text)
+
+        school = admin.post("/api/v1/schools", json={"name": f"Trường kiểm thử {uuid4()}"}).json()
+        member = admin.put(f"/api/v1/schools/{school['id']}/members", json={"email": collaborator_email, "role": "teacher"})
+        self.assertEqual(member.status_code, 200, member.text)
+        self.assertEqual(collaborator.put(f"/api/v1/schools/{school['id']}/members", json={"email": outsider_email, "role": "teacher"}).status_code, 403)
+
+        generated = admin.post("/api/generate", json={"title": "Bài chia sẻ", "source": "Nguồn bài học.", "provider": "mock"}).json()
+        project = admin.post("/api/v1/projects", json={"title": "Bài chia sẻ", "direction": "lesson", "course": generated["course"]}).json()
+        cannot_share = admin.put(f"/api/v1/projects/{project['id']}/shares", json={"email": outsider_email, "access_level": "viewer"})
+        self.assertEqual(cannot_share.status_code, 422, cannot_share.text)
+        viewer = admin.put(f"/api/v1/projects/{project['id']}/shares", json={"email": collaborator_email, "access_level": "viewer"})
+        self.assertEqual(viewer.status_code, 200, viewer.text)
+
+        shared_project = collaborator.get(f"/api/v1/projects/{project['id']}")
+        self.assertEqual(shared_project.status_code, 200, shared_project.text)
+        self.assertEqual(shared_project.json()["access_level"], "viewer")
+        course = shared_project.json()["course"]
+        course["revision"] = 2
+        self.assertEqual(collaborator.patch(f"/api/v1/projects/{project['id']}", json={"expected_revision": 1, "course": course}).status_code, 403)
+
+        editor = admin.put(f"/api/v1/projects/{project['id']}/shares", json={"email": collaborator_email, "access_level": "editor"})
+        self.assertEqual(editor.status_code, 200, editor.text)
+        updated = collaborator.patch(f"/api/v1/projects/{project['id']}", json={"expected_revision": 1, "course": course})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["access_level"], "editor")
+        admin_user = admin.get("/api/v1/me").json()
+        collaborator_user = collaborator.get("/api/v1/me").json()
+        self.assertEqual(admin.delete(f"/api/v1/schools/{school['id']}/members/{admin_user['id']}").status_code, 409)
+        self.assertEqual(admin.delete(f"/api/v1/schools/{school['id']}/members/{collaborator_user['id']}").status_code, 204)
+        self.assertEqual(collaborator.get(f"/api/v1/projects/{project['id']}").status_code, 404)
 
 
 if __name__ == "__main__":

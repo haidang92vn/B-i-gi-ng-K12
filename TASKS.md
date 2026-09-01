@@ -88,13 +88,13 @@ Acceptance:
 - scoring is deterministic and tested.
 
 ## Milestone 08 — HTML5 player [P0]
-- [ ] Previous/Next.
-- [ ] Progress.
-- [ ] Slide menu.
-- [ ] Responsive/fullscreen.
-- [ ] Free/sequential/restricted navigation.
-- [ ] Theme/layout rendering.
-- [ ] Safe rendering of teacher/AI text.
+- [x] Previous/Next.
+- [x] Progress.
+- [x] Slide menu.
+- [x] Responsive/fullscreen.
+- [x] Free/sequential/restricted navigation.
+- [x] Theme/layout rendering.
+- [x] Safe rendering of teacher/AI text.
 
 Acceptance:
 - desktop/mobile usable;

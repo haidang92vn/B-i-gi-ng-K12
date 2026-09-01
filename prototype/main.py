@@ -1,7 +1,7 @@
 
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile, status
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Literal, Optional
 from pathlib import Path
@@ -226,6 +226,9 @@ class ExportRequest(BaseModel):
     passing_score: int = 70
     completion_percent: int = 90
     resume: bool = True
+    navigation_mode: Literal["free", "sequential", "restricted"] = "free"
+    show_menu: bool = True
+    primary_color: str | None = None
 
 def compact_sentences(text: str):
     text = re.sub(r"\s+", " ", text or "").strip()
@@ -684,9 +687,31 @@ window.addEventListener("load", scormInit);
 window.addEventListener("beforeunload", scormFinish);
 '''
 
+def export_request_from_course(course: Course) -> ExportRequest:
+    return ExportRequest(
+        title=course.metadata.title, direction=course.metadata.direction,
+        objectives=[item.text for item in course.objectives],
+        sections=[{"id": slide.id, "title": slide.title, "layout": slide.layout,
+                   "content": next((block.text for block in slide.blocks if block.type == "text"), "")}
+                  for slide in course.slides],
+        quizzes=[QuizItem(id=item.id, question=item.question, options=item.options,
+                          answer=json.dumps(item.correct_answer, ensure_ascii=False) if not isinstance(item.correct_answer, str) else item.correct_answer,
+                          quiz_type=item.type, selected=item.selected) for item in course.question_bank],
+        passing_score=course.completion.passing_score, completion_percent=course.completion.viewed_percent,
+        resume=course.scorm.resume, navigation_mode=course.navigation.mode,
+        show_menu=course.navigation.show_menu, primary_color=course.theme.primary_color,
+    )
+
+
+def json_for_script(value: object) -> str:
+    """Embed data in a script without allowing authored text to end the tag."""
+    return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
 def build_course_html(req: ExportRequest):
     title = html.escape(req.title)
     direction = html.escape(req.direction)
+    primary_color = req.primary_color if req.primary_color and re.fullmatch(r"#[0-9A-Fa-f]{3,8}", req.primary_color) else "#3157d5"
 
     slides = []
     slides.append(f'''
@@ -703,8 +728,9 @@ def build_course_html(req: ExportRequest):
 
     for idx, s in enumerate(req.sections, start=1):
         content = html.escape(str(s.get("content",""))).replace("\n", "<br>")
+        layout = re.sub(r"[^a-z0-9_-]", "", str(s.get("layout", "content")).lower()) or "content"
         slides.append(f'''
-          <section class="slide" data-slide="{idx}">
+          <section class="slide layout-{layout}" data-slide="{idx}">
             <div class="eyebrow">Nội dung {idx}</div>
             <h2>{html.escape(str(s.get("title","Phần học")))}</h2>
             <div class="content">{content}</div>
@@ -749,7 +775,7 @@ def build_course_html(req: ExportRequest):
         "quizCount": len(selected),
         "passing": req.passing_score,
         "completion": req.completion_percent,
-        "resume": req.resume
+        "resume": req.resume, "navigationMode": req.navigation_mode, "showMenu": req.show_menu
     }
     answers = {q.id: q.answer for q in selected}
 
@@ -760,7 +786,7 @@ def build_course_html(req: ExportRequest):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>
 <style>
-:root{{--bg:#f5f7fb;--card:#fff;--ink:#152033;--muted:#6b7280;--accent:#3157d5;}}
+:root{{--bg:#f5f7fb;--card:#fff;--ink:#152033;--muted:#6b7280;--accent:{primary_color};}}
 *{{box-sizing:border-box}}
 body{{margin:0;font-family:Inter,system-ui,Arial,sans-serif;background:var(--bg);color:var(--ink)}}
 .shell{{min-height:100vh;display:grid;grid-template-rows:1fr auto}}
@@ -779,28 +805,35 @@ h1{{font-size:44px;margin:12px 0}} h2{{font-size:34px}} .lead{{font-size:20px;co
 .primary,#next{{background:var(--accent);color:#fff}} #prev{{background:#eef1f7}} .spacer{{flex:1}}
 .progress{{height:8px;background:#e6e9f0;border-radius:99px;overflow:hidden;width:min(360px,35vw)}} .bar{{height:100%;background:var(--accent);width:0}}
 #quizResult{{font-weight:700;margin-top:16px}}
+.menu{{position:fixed;left:16px;top:16px;width:220px;max-height:calc(100vh - 32px);overflow:auto;background:#fff;border:1px solid #e5e7ef;border-radius:14px;padding:10px;box-shadow:0 12px 35px rgba(20,30,50,.12)}}.menu button{{display:block;width:100%;border:0;background:transparent;padding:9px;text-align:left;border-radius:8px;cursor:pointer}}.menu button.active{{background:#edf1ff;color:var(--accent);font-weight:700}}.fullscreen{{background:#eef1f7}}.layout-two_column .content{{columns:2;column-gap:32px}}.layout-callout .content{{border-left:5px solid var(--accent);padding-left:20px}}@media(max-width:760px){{.stage{{padding:14px}}.slide{{padding:24px;min-height:calc(100vh - 88px)}}h1{{font-size:32px}}h2{{font-size:27px}}.toolbar{{padding:12px;gap:8px}}.progress{{width:80px}}.menu{{display:none}}.layout-two_column .content{{columns:1}}}}
 </style>
 <script src="runtime.js"></script>
 </head>
 <body>
 <div class="shell">
+  <aside id="menu" class="menu"></aside>
   <main class="stage">{''.join(slides)}</main>
   <div class="toolbar">
     <button id="prev" onclick="go(-1)">← Trước</button>
     <div class="progress"><div id="bar" class="bar"></div></div>
     <span id="count"></span>
     <div class="spacer"></div>
+    <button class="fullscreen" onclick="toggleFullscreen()">Toàn màn hình</button>
     <button id="next" onclick="go(1)">Tiếp →</button>
   </div>
 </div>
 <script>
-const CFG = {json.dumps(data, ensure_ascii=False)};
-const ANSWERS = {json.dumps(answers, ensure_ascii=False)};
+const CFG = {json_for_script(data)};
+const ANSWERS = {json_for_script(answers)};
 const slides = [...document.querySelectorAll(".slide")];
 let current = 0;
+let highestVisited = 0;
 
 function show(i){{
+  if(CFG.navigationMode === "sequential" && i > highestVisited + 1) return;
+  if(CFG.navigationMode === "restricted" && Math.abs(i-current) > 1) return;
   current = Math.max(0, Math.min(i, slides.length-1));
+  highestVisited = Math.max(highestVisited,current);
   slides.forEach((s,n)=>s.classList.toggle("active",n===current));
   document.getElementById("count").textContent = `${{current+1}} / ${{slides.length}}`;
   document.getElementById("bar").style.width = `${{((current+1)/slides.length)*100}}%`;
@@ -810,8 +843,16 @@ function show(i){{
   const progress = Math.round(((current+1)/slides.length)*100);
   scormSet("cmi.progress_measure", progress/100);
   if(progress >= CFG.completion) scormSet("cmi.completion_status","completed");
+  renderMenu();
 }}
 function go(delta){{ show(current+delta); }}
+function renderMenu(){{
+  const menu=document.getElementById("menu");
+  menu.hidden=!CFG.showMenu;
+  if(!CFG.showMenu) return;
+  menu.innerHTML=slides.map((slide,index)=>`<button class="${{index===current?"active":""}}" ${{index>highestVisited&&CFG.navigationMode!=="free"?"disabled":""}} onclick="show(${{index}})">Slide ${{index+1}}</button>`).join("");
+}}
+function toggleFullscreen(){{if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();else document.exitFullscreen?.();}}
 
 function submitQuiz(){{
   let correct=0;
@@ -864,6 +905,14 @@ def export_scorm(req: ExportRequest):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{safe}_SCORM2004.zip"'}
     )
+
+
+@app.get("/api/v1/projects/{project_id}/player", response_class=HTMLResponse)
+def preview_player(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return HTMLResponse(build_course_html(export_request_from_course(Course.model_validate(project.course_json))))
 
 @app.get("/")
 def home():

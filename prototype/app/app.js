@@ -234,6 +234,7 @@ function refreshPreview(){
   const first=g.sections[0];
   p.innerHTML=`<span class="eyebrow">${escapeHtml(g.direction_name)}</span><h3>${escapeHtml(title)}</h3><p><strong>${escapeHtml(first.title)}</strong></p><p>${escapeHtml(first.content)}</p>`;
 }
+document.getElementById("openPlayerBtn").onclick=()=>{if(!state.project){alert("Hãy tạo và lưu bản nháp bài giảng trước.");return;}window.open(`/api/v1/projects/${state.project.id}/player`,"_blank","noopener");};
 
 function slugName(s){return (s||"Bai_hoc").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"");}
 function refreshExportName(){document.getElementById("exportName").textContent=`${slugName(document.getElementById("lessonTitle").value)}_SCORM2004.zip`;}

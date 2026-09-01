@@ -129,6 +129,17 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(restored["objective_ids"], ["o1"])
         self.assertEqual(restored["feedback_correct"], "Tốt.")
 
+    def test_player_renders_canonical_project_and_escapes_authored_html(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"teacher-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        generated = client.post("/api/generate", json={"title": "Bài player", "source": "<script>alert('x')</script> Nội dung an toàn.", "provider": "mock"}).json()
+        project = client.post("/api/v1/projects", json={"title": "Bài player", "direction": "lesson", "course": generated["course"]}).json()
+        player = client.get(f"/api/v1/projects/{project['id']}/player")
+        self.assertEqual(player.status_code, 200, player.text)
+        self.assertIn("Toàn màn hình", player.text)
+        self.assertIn("navigationMode", player.text)
+        self.assertIn("&lt;script&gt;alert", player.text)
+
     def test_project_course_persists_and_revision_conflicts_are_rejected(self):
         client = TestClient(self.module.app)
         title = f"Kiểm thử persistence {uuid4()}"

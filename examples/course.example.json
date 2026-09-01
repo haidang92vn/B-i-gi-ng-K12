@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0.0",
+  "id": "course_demo_001",
+  "revision": 1,
+  "metadata": {
+    "title": "Bài học mẫu",
+    "subject": null,
+    "grade": null,
+    "teacher_name": null,
+    "school_name": null,
+    "direction": "lesson",
+    "language": "vi-VN"
+  },
+  "objectives": [
+    {"id": "obj_1", "text": "Nắm được kiến thức trọng tâm của bài học."},
+    {"id": "obj_2", "text": "Vận dụng kiến thức để trả lời câu hỏi."}
+  ],
+  "slides": [
+    {
+      "id": "slide_1",
+      "title": "Khởi động",
+      "layout": "title_text",
+      "status": "ai_draft",
+      "blocks": [
+        {"id": "b1", "type": "heading", "text": "Khởi động", "asset_id": null, "question_id": null, "settings": {}},
+        {"id": "b2", "type": "text", "text": "Nội dung mở đầu của bài học.", "asset_id": null, "question_id": null, "settings": {}}
+      ],
+      "speaker_notes": null
+    }
+  ],
+  "question_bank": [
+    {
+      "id": "q1",
+      "type": "single",
+      "question": "Nội dung nào phù hợp nhất với bài học?",
+      "options": ["Đáp án đúng", "Nhiễu 1", "Nhiễu 2", "Nhiễu 3"],
+      "correct_answer": "Đáp án đúng",
+      "explanation": "Giải thích ngắn gọn.",
+      "feedback_correct": "Chính xác.",
+      "feedback_incorrect": "Hãy xem lại nội dung liên quan.",
+      "selected": true,
+      "score": 10,
+      "difficulty": "understand",
+      "objective_ids": ["obj_1"],
+      "settings": {}
+    }
+  ],
+  "theme": {"id": "default_light", "primary_color": null, "font_family": null, "logo_asset_id": null},
+  "navigation": {"mode": "restricted", "show_menu": true, "show_progress": true},
+  "completion": {"viewed_percent": 90, "passing_score": 70, "require_quiz": true},
+  "scorm": {"standard": "SCORM_2004", "edition": null, "preset": "k12online", "resume": true, "track_score": true, "track_completion": true, "track_success": true}
+}

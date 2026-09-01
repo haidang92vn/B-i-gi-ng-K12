@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI SCORM Studio — Demo</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">S</div>
+      <div><strong>AI SCORM Studio</strong><span>Demo • K12Online</span></div>
+    </div>
+    <div class="steps" id="steps">
+      <button class="step active" data-step="1"><b>1</b><span>Nhập nội dung<small>Nguồn bài học</small></span></button>
+      <button class="step" data-step="2"><b>2</b><span>Định hướng<small>Bài học / Ôn tập / Nâng cao</small></span></button>
+      <button class="step" data-step="3"><b>3</b><span>AI tạo nội dung<small>Kịch bản + câu hỏi</small></span></button>
+      <button class="step" data-step="4"><b>4</b><span>Giáo viên duyệt<small>Sửa trước khi xuất bản</small></span></button>
+      <button class="step" data-step="5"><b>5</b><span>Chọn Quiz<small>Dạng câu hỏi tương tác</small></span></button>
+      <button class="step" data-step="6"><b>6</b><span>Dựng bài giảng<small>HTML5 + player</small></span></button>
+      <button class="step" data-step="7"><b>7</b><span>Cấu hình SCORM<small>K12Online • SCORM 2004</small></span></button>
+      <button class="step" data-step="8"><b>8</b><span>Kiểm tra & xuất<small>ZIP sẵn sàng upload</small></span></button>
+    </div>
+    <div class="side-note">
+      <strong>Nguyên tắc</strong>
+      <p>AI tạo nháp. Giáo viên duyệt. Hệ thống mới đóng gói SCORM.</p>
+    </div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <div><span class="eyebrow">WORKFLOW DEMO</span><h1 id="pageTitle">Nhập nội dung bài học</h1></div>
+      <div class="status"><span class="dot"></span> Demo cục bộ</div>
+    </header>
+
+    <section class="workspace">
+      <div class="panel page active" data-page="1">
+        <div class="panel-head"><div><h2>Nguồn bài học</h2><p>Dán nội dung giáo viên muốn chuyển thành bài giảng.</p></div><span class="badge">TASK 01</span></div>
+        <label>Tên bài học</label>
+        <input id="lessonTitle" value="Bài học mẫu" placeholder="Ví dụ: Phân số bằng nhau">
+        <label>Nội dung nguồn</label>
+        <textarea id="sourceText" rows="14" placeholder="Dán nội dung bài học tại đây...">Khái niệm chính của bài học cần được trình bày rõ ràng, ngắn gọn và theo trình tự. Học sinh cần được quan sát ví dụ trước khi thực hành. Sau mỗi phần kiến thức nên có câu hỏi kiểm tra nhanh. Cuối bài cần có hoạt động củng cố để đánh giá mức độ hiểu bài.</textarea>
+        <div class="hint">Bản demo dùng văn bản. Phiên bản đầy đủ có thể bổ sung DOCX, PDF, PPTX.</div>
+      </div>
+
+      <div class="panel page" data-page="2">
+        <div class="panel-head"><div><h2>Chọn định hướng triển khai</h2><p>Điều khiển cách AI tổ chức nội dung và độ khó câu hỏi.</p></div><span class="badge">TASK 02</span></div>
+        <div class="direction-grid">
+          <label class="direction-card selected"><input type="radio" name="direction" value="lesson" checked><span class="icon">01</span><strong>Bài học mới</strong><p>Giới thiệu → hình thành kiến thức → ví dụ → củng cố.</p></label>
+          <label class="direction-card"><input type="radio" name="direction" value="review"><span class="icon">02</span><strong>Ôn tập – củng cố</strong><p>Gợi nhớ → hệ thống hóa → luyện tập → tổng kết.</p></label>
+          <label class="direction-card"><input type="radio" name="direction" value="advanced"><span class="icon">03</span><strong>Nâng cao – mở rộng</strong><p>Đặt vấn đề → phân tích → thử thách → vận dụng.</p></label>
+        </div>
+      </div>
+
+      <div class="panel page" data-page="3">
+        <div class="panel-head"><div><h2>AI tạo cấu trúc bài giảng</h2><p>API cá nhân của giáo viên sẽ được gọi ở bước này.</p></div><span class="badge">TASK 03</span></div>
+        <div class="api-box">
+          <div><label>Nhà cung cấp API</label><select id="provider"><option value="mock">Mock AI (Demo)</option><option value="custom">Custom Provider</option></select></div>
+          <div><label>API key</label><input id="apiKey" type="password" placeholder="Không cần nhập trong demo"></div>
+          <button id="generateBtn" class="primary">Tạo nội dung bằng AI</button>
+        </div>
+        <div class="security-note">Demo không lưu API key. Bản production cần xử lý khóa API phía backend và không ghi log.</div>
+        <div id="aiOutput" class="empty-state"><div class="spark">✦</div><strong>Chưa tạo nội dung</strong><p>Nhấn nút để sinh mục tiêu, cấu trúc bài và ngân hàng câu hỏi.</p></div>
+      </div>
+
+      <div class="panel page" data-page="4">
+        <div class="panel-head"><div><h2>Giáo viên duyệt nội dung</h2><p>Chỉnh sửa trực tiếp trước khi hệ thống dựng bài.</p></div><span class="badge">TASK 04</span></div>
+        <div id="reviewArea" class="empty-state">Chưa có nội dung AI. Hãy hoàn thành Task 03 trước.</div>
+      </div>
+
+      <div class="panel page" data-page="5">
+        <div class="panel-head"><div><h2>Chọn dạng câu hỏi Quiz</h2><p>Chọn câu hỏi cần dùng và đổi dạng tương tác cho từng câu.</p></div><span class="badge">TASK 05</span></div>
+        <div class="quiz-toolbar"><span id="quizCount">0 câu được chọn</span><button class="ghost" id="selectAll">Chọn tất cả</button></div>
+        <div id="quizArea" class="empty-state">Ngân hàng câu hỏi sẽ xuất hiện sau khi AI tạo nội dung.</div>
+      </div>
+
+      <div class="panel page" data-page="6">
+        <div class="panel-head"><div><h2>Dựng bài giảng HTML5</h2><p>Biến nội dung đã duyệt thành các slide/player tương tác.</p></div><span class="badge">TASK 06</span></div>
+        <div class="build-flow">
+          <div><b>01</b><span>Nội dung đã duyệt</span></div><i>→</i>
+          <div><b>02</b><span>Slide HTML5</span></div><i>→</i>
+          <div><b>03</b><span>Quiz tương tác</span></div><i>→</i>
+          <div><b>04</b><span>SCORM Runtime</span></div>
+        </div>
+        <div class="preview-shell">
+          <div class="preview-top"><span></span><span></span><span></span><b>Preview bài giảng</b></div>
+          <div id="coursePreview" class="preview-body"><span class="eyebrow">BẢN XEM TRƯỚC</span><h3>Bài học mẫu</h3><p>Nội dung sau khi duyệt sẽ được bố trí thành player tương tự iSpring.</p></div>
+          <div class="preview-controls"><button>← Trước</button><div class="mini-progress"><span></span></div><button>Tiếp →</button></div>
+        </div>
+      </div>
+
+      <div class="panel page" data-page="7">
+        <div class="panel-head"><div><h2>Cấu hình LMS / SCORM</h2><p>Preset mặc định dành cho K12Online.</p></div><span class="badge">TASK 07</span></div>
+        <div class="preset"><span>Preset</span><strong>K12Online</strong><em>SCORM 2004</em></div>
+        <div class="settings-grid">
+          <label>Chuẩn LMS<select disabled><option>SCORM 2004</option></select></label>
+          <label>Điểm đạt<input id="passingScore" type="number" value="70" min="0" max="100"></label>
+          <label>Tỷ lệ xem tối thiểu<input id="completionPercent" type="number" value="90" min="0" max="100"></label>
+          <label class="switch-row"><span>Resume vị trí học</span><input id="resumeToggle" type="checkbox" checked></label>
+          <label class="switch-row"><span>Gửi điểm về LMS</span><input type="checkbox" checked disabled></label>
+          <label class="switch-row"><span>Completion + Success status</span><input type="checkbox" checked disabled></label>
+        </div>
+      </div>
+
+      <div class="panel page" data-page="8">
+        <div class="panel-head"><div><h2>Kiểm tra và xuất SCORM</h2><p>Tạo ZIP có manifest, player và runtime để tải lên K12Online.</p></div><span class="badge">TASK 08</span></div>
+        <div class="checklist" id="checklist">
+          <div><span>✓</span><p><strong>imsmanifest.xml</strong><small>SCORM 2004 • SCO entry point</small></p></div>
+          <div><span>✓</span><p><strong>index.html</strong><small>HTML5 player</small></p></div>
+          <div><span>✓</span><p><strong>runtime.js</strong><small>Initialize / SetValue / Commit / Terminate</small></p></div>
+          <div><span>✓</span><p><strong>Tracking</strong><small>Điểm • trạng thái • vị trí học</small></p></div>
+        </div>
+        <div class="export-card">
+          <div><span class="eyebrow">OUTPUT</span><h3 id="exportName">Bai_hoc_mau_SCORM2004.zip</h3><p>Sẵn sàng upload vào Bài học chuẩn SCORM trên K12Online.</p></div>
+          <button id="exportBtn" class="primary big">Xuất SCORM ZIP</button>
+        </div>
+        <div id="exportStatus"></div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <button id="backBtn" class="ghost" disabled>← Quay lại</button>
+      <div class="footer-center"><span id="footerStep">Bước 1/8</span></div>
+      <button id="nextBtn" class="primary">Tiếp tục →</button>
+    </footer>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

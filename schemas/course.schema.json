@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/course.schema.json",
+  "title": "AI SCORM Studio Course",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "revision", "metadata", "objectives", "slides", "question_bank", "theme", "navigation", "completion", "scorm"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "id": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "direction", "language"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1},
+        "subject": {"type": ["string", "null"]},
+        "grade": {"type": ["string", "null"]},
+        "teacher_name": {"type": ["string", "null"]},
+        "school_name": {"type": ["string", "null"]},
+        "direction": {"type": "string", "enum": ["lesson", "review", "advanced"]},
+        "language": {"type": "string", "default": "vi-VN"}
+      }
+    },
+    "objectives": {
+      "type": "array",
+      "items": {"type": "object", "required": ["id", "text"], "properties": {"id": {"type": "string"}, "text": {"type": "string"}}, "additionalProperties": false}
+    },
+    "slides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "layout", "status", "blocks"],
+        "properties": {
+          "id": {"type": "string"},
+          "title": {"type": "string"},
+          "layout": {"type": "string"},
+          "status": {"type": "string", "enum": ["ai_draft", "edited", "approved"]},
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "type"],
+              "properties": {
+                "id": {"type": "string"},
+                "type": {"type": "string", "enum": ["heading", "text", "image", "audio", "video", "callout", "quiz", "embed"]},
+                "text": {"type": ["string", "null"]},
+                "asset_id": {"type": ["string", "null"]},
+                "question_id": {"type": ["string", "null"]},
+                "settings": {"type": "object"}
+              },
+              "additionalProperties": false
+            }
+          },
+          "speaker_notes": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "question_bank": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "question", "selected", "score", "difficulty", "correct_answer"],
+        "properties": {
+          "id": {"type": "string"},
+          "type": {"type": "string", "enum": ["single", "multiple", "truefalse", "fill", "matching", "ordering", "dragdrop", "image"]},
+          "question": {"type": "string"},
+          "options": {"type": "array", "items": {"type": "string"}},
+          "correct_answer": {},
+          "explanation": {"type": ["string", "null"]},
+          "feedback_correct": {"type": ["string", "null"]},
+          "feedback_incorrect": {"type": ["string", "null"]},
+          "selected": {"type": "boolean"},
+          "score": {"type": "number", "minimum": 0},
+          "difficulty": {"type": "string", "enum": ["recognize", "understand", "apply", "advanced"]},
+          "objective_ids": {"type": "array", "items": {"type": "string"}},
+          "settings": {"type": "object"}
+        }
+      }
+    },
+    "theme": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string"},
+        "primary_color": {"type": ["string", "null"]},
+        "font_family": {"type": ["string", "null"]},
+        "logo_asset_id": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "navigation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "show_menu", "show_progress"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["free", "sequential", "restricted"]},
+        "show_menu": {"type": "boolean"},
+        "show_progress": {"type": "boolean"}
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewed_percent", "passing_score", "require_quiz"],
+      "properties": {
+        "viewed_percent": {"type": "integer", "minimum": 0, "maximum": 100},
+        "passing_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "require_quiz": {"type": "boolean"}
+      }
+    },
+    "scorm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["standard", "preset", "resume", "track_score", "track_completion", "track_success"],
+      "properties": {
+        "standard": {"type": "string", "enum": ["SCORM_2004"]},
+        "edition": {"type": ["string", "null"]},
+        "preset": {"type": "string", "enum": ["k12online", "custom"]},
+        "resume": {"type": "boolean"},
+        "track_score": {"type": "boolean"},
+        "track_completion": {"type": "boolean"},
+        "track_success": {"type": "boolean"}
+      }
+    }
+  }
+}

@@ -1,16 +1,60 @@
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import List, Literal, Optional
 from pathlib import Path
 import io, zipfile, html, json, re
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
+
+from prototype.course_models import Course, new_course
+from prototype.persistence import Project, create_schema, make_session_factory
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "app"
 
+DEMO_OWNER_ID = "demo-teacher"
+BASE_DIR.joinpath("storage").mkdir(exist_ok=True)
+engine, SessionLocal = make_session_factory()
+create_schema(engine)
+
 app = FastAPI(title="AI SCORM Studio Demo")
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+class ProjectCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    direction: Literal["lesson", "review", "advanced"] = "lesson"
+    course: Course | None = None
+
+
+class ProjectUpdateRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    course: Course
+
+
+class ProjectResponse(BaseModel):
+    id: str
+    title: str
+    status: str
+    revision: int
+    course: Course
+
+
+def serialize_project(project: Project) -> ProjectResponse:
+    return ProjectResponse(
+        id=project.id, title=project.title, status=project.status,
+        revision=project.revision, course=Course.model_validate(project.course_json),
+    )
 
 class GenerateRequest(BaseModel):
     title: str
@@ -108,18 +152,113 @@ def make_mock_content(req: GenerateRequest):
             "selected": True
         })
 
-    return {
+    generated = {
         "direction_name": direction_name,
         "objectives": objectives,
         "sections": sections,
         "quizzes": quizzes,
         "notice": "DEMO đang dùng Mock AI. Khi triển khai thật, thay adapter này bằng API cá nhân của giáo viên ở phía backend."
     }
+    course_data = new_course(req.title or "Bài học", req.direction).model_dump(mode="json")
+    course_data["objectives"] = [{"id": f"o{i+1}", "text": text} for i, text in enumerate(objectives)]
+    course_data["slides"] = [
+        {
+            "id": section["id"], "title": section["title"], "layout": "content",
+            "status": "ai_draft",
+            "blocks": [{"id": f"{section['id']}-text", "type": "text", "text": section["content"], "settings": {}}],
+            "speaker_notes": section["note"],
+        }
+        for section in sections
+    ]
+    course_data["question_bank"] = [
+        {
+            "id": quiz["id"], "type": quiz["quiz_type"], "question": quiz["question"],
+            "options": quiz["options"], "correct_answer": quiz["answer"], "selected": quiz["selected"],
+            "score": 1, "difficulty": "understand", "objective_ids": [], "settings": {},
+        }
+        for quiz in quizzes
+    ]
+    generated["course"] = Course.model_validate(course_data).model_dump(mode="json")
+    return generated
 
 @app.post("/api/generate")
 def generate(req: GenerateRequest):
     # Demo: không lưu API key. Production sẽ thay bằng provider adapter server-side.
     return make_mock_content(req)
+
+
+@app.get("/api/v1/projects", response_model=list[ProjectResponse])
+def list_projects(db: Session = Depends(get_db)):
+    """List only the current demo teacher's projects.
+
+    Milestone 02 replaces this fixed demo identity with authenticated user
+    resolution; callers never supply an owner id themselves.
+    """
+    projects = db.scalars(
+        select(Project).where(Project.owner_user_id == DEMO_OWNER_ID).order_by(Project.updated_at.desc())
+    ).all()
+    return [serialize_project(project) for project in projects]
+
+
+@app.post("/api/v1/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+def create_project(payload: ProjectCreateRequest, db: Session = Depends(get_db)):
+    course = payload.course or new_course(payload.title, payload.direction)
+    if course.revision != 1:
+        raise HTTPException(status_code=422, detail="A newly created project must start at revision 1.")
+    if course.metadata.title != payload.title:
+        course.metadata.title = payload.title
+    project = Project(
+        id=course.id, owner_user_id=DEMO_OWNER_ID, title=course.metadata.title,
+        status="active", course_json=course.model_dump(mode="json"),
+        schema_version=course.schema_version, revision=course.revision,
+    )
+    db.add(project)
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A project with this course id already exists.") from exc
+    db.refresh(project)
+    return serialize_project(project)
+
+
+@app.get("/api/v1/projects/{project_id}", response_model=ProjectResponse)
+def get_project(project_id: str, db: Session = Depends(get_db)):
+    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == DEMO_OWNER_ID))
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return serialize_project(project)
+
+
+@app.patch("/api/v1/projects/{project_id}", response_model=ProjectResponse)
+def update_project(project_id: str, payload: ProjectUpdateRequest, db: Session = Depends(get_db)):
+    if payload.course.id != project_id:
+        raise HTTPException(status_code=422, detail="course.id must match the project id.")
+    if payload.course.revision != payload.expected_revision + 1:
+        raise HTTPException(status_code=422, detail="course.revision must be exactly one greater than expected_revision.")
+
+    result = db.execute(
+        update(Project)
+        .where(
+            Project.id == project_id,
+            Project.owner_user_id == DEMO_OWNER_ID,
+            Project.revision == payload.expected_revision,
+        )
+        .values(
+            title=payload.course.metadata.title,
+            course_json=payload.course.model_dump(mode="json"),
+            schema_version=payload.course.schema_version,
+            revision=payload.course.revision,
+        )
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        existing = db.scalar(select(Project.id).where(Project.id == project_id, Project.owner_user_id == DEMO_OWNER_ID))
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Project not found.")
+        raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
+    db.commit()
+    return get_project(project_id, db)
 
 def scorm_manifest(title: str):
     safe_title = html.escape(title)

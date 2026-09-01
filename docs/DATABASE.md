@@ -2,6 +2,14 @@
 
 Use PostgreSQL. Use UUID primary keys unless the implementation has a strong reason otherwise. All timestamps should be timezone-aware.
 
+## Milestone 01 implementation
+
+`migrations/versions/20260901_01_create_projects.py` creates the initial `projects` table.
+It stores `course_json` as JSON/JSONB (JSONB on PostgreSQL) and enforces optimistic updates
+in the API by matching the submitted `expected_revision` in the SQL update predicate. Local
+prototype runs may use SQLite only; production must set `DATABASE_URL` to PostgreSQL and run
+`alembic upgrade head` before starting the API.
+
 ## users
 - id
 - email (unique, normalized)

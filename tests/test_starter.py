@@ -4,7 +4,9 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+from uuid import uuid4
 
+from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +57,32 @@ class PrototypeTests(unittest.TestCase):
         runtime = self.module.runtime_js()
         for token in ["API_1484_11", "Initialize", "SetValue", "Commit", "Terminate"]:
             self.assertIn(token, runtime)
+
+    def test_project_course_persists_and_revision_conflicts_are_rejected(self):
+        client = TestClient(self.module.app)
+        title = f"Kiểm thử persistence {uuid4()}"
+        created = client.post("/api/v1/projects", json={"title": title, "direction": "lesson"})
+        self.assertEqual(created.status_code, 201, created.text)
+        project = created.json()
+        self.assertEqual(project["course"]["metadata"]["title"], title)
+        self.assertEqual(project["course"]["revision"], 1)
+
+        updated_course = project["course"]
+        updated_course["revision"] = 2
+        updated_course["metadata"]["title"] = f"{title} đã sửa"
+        updated = client.patch(
+            f"/api/v1/projects/{project['id']}",
+            json={"expected_revision": 1, "course": updated_course},
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["revision"], 2)
+
+        stale = client.patch(
+            f"/api/v1/projects/{project['id']}",
+            json={"expected_revision": 1, "course": updated_course},
+        )
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.json()["detail"]["code"], "COURSE_REVISION_CONFLICT")
 
 
 if __name__ == "__main__":

@@ -56,18 +56,33 @@ GitHub Actions trong `.github/workflows/validate.yml` chạy lại các kiểm t
 ## Chạy prototype hiện tại
 
 ```bash
-cd prototype
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn prototype.main:app --reload
 ```
 
 Mở `http://127.0.0.1:8000`.
 
 Prototype hiện hỗ trợ mock AI, duyệt nội dung, chọn dạng Quiz, preview và tạo gói SCORM
 2004 cơ bản. Chi tiết những gì chưa có xem `STATUS.md`.
+
+## Milestone 01: canonical course + persistence
+
+Prototype tự tạo một SQLite database cục bộ trong `prototype/storage/` để demo. Mỗi lần
+tạo nội dung mock, bản nháp được chuyển sang `course.json` chuẩn và lưu thành project; các
+chỉnh sửa phần duyệt nội dung/quiz sẽ tự lưu với revision tăng dần. Đây chỉ là danh tính demo
+trong khi chưa có Milestone 02 (đăng nhập).
+
+Khi dùng PostgreSQL, đặt `DATABASE_URL` theo `.env.example`, rồi áp migration:
+
+```bash
+alembic upgrade head
+```
+
+Các API hiện có: `GET/POST /api/v1/projects`, `GET/PATCH /api/v1/projects/{project_id}`.
+`PATCH` bắt buộc gửi `expected_revision`; server từ chối cập nhật cũ thay vì ghi đè âm thầm.
 
 ## Cấu trúc repository thực tế
 

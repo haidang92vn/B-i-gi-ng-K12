@@ -14,13 +14,15 @@ architecture. It is **not yet the production application**.
 - Basic HTML5 course rendering.
 - Basic SCORM 2004 package generation.
 - `course.json` JSON Schema and example.
+- Versioned Pydantic `course.json` model, project persistence and Alembic migration.
+- Optimistic revision handling for project reads/updates in the prototype API.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 
 ### Not implemented yet
 
 - Production Next.js frontend.
-- Persistent PostgreSQL project library.
+- Production PostgreSQL project library (the local prototype uses SQLite; deployment must run the Alembic migration against PostgreSQL).
 - Authentication/authorization.
 - Cloudflare R2/S3 file storage.
 - Encrypted per-teacher AI credentials.

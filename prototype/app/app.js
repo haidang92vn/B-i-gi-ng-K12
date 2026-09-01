@@ -1,6 +1,7 @@
 
 let currentStep = 1;
-let state = { direction: "lesson", generated: null };
+let state = { direction: "lesson", generated: null, project: null };
+let saveTimer = null;
 
 const titles = ["Nhập nội dung bài học","Chọn định hướng","AI tạo nội dung","Giáo viên duyệt","Chọn dạng Quiz","Dựng bài giảng","Cấu hình SCORM","Kiểm tra & xuất"];
 
@@ -44,6 +45,7 @@ async function generateAI(){
     const r=await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
     if(!r.ok) throw new Error("Không gọi được dịch vụ tạo nội dung.");
     state.generated=await r.json();
+    await createProjectFromGenerated();
     renderAI(); renderReview(); renderQuiz();
   }catch(e){
     document.getElementById("aiOutput").innerHTML=`<strong>Lỗi</strong><p>${escapeHtml(e.message)}</p>`;
@@ -52,6 +54,52 @@ async function generateAI(){
   }
 }
 document.getElementById("generateBtn").onclick=generateAI;
+
+function syncCanonicalCourse(){
+  const g=state.generated;if(!g || !g.course)return null;
+  const course=g.course;
+  course.metadata.title=document.getElementById("lessonTitle").value || "Bài học";
+  course.metadata.direction=state.direction;
+  course.objectives=g.objectives.map((text,i)=>({id:`o${i+1}`,text}));
+  course.slides=g.sections.map((s,i)=>({
+    id:s.id || `s${i+1}`,title:s.title,layout:"content",status:"edited",
+    blocks:[{id:`${s.id || `s${i+1}`}-text`,type:"text",text:s.content,settings:{}}],
+    speaker_notes:s.note || null
+  }));
+  course.question_bank=g.quizzes.map(q=>({
+    id:q.id,type:q.quiz_type,question:q.question,options:q.options || [],
+    correct_answer:q.answer,selected:Boolean(q.selected),score:1,difficulty:"understand",
+    objective_ids:[],settings:{},explanation:null,feedback_correct:null,feedback_incorrect:null
+  }));
+  return course;
+}
+
+async function createProjectFromGenerated(){
+  const course=syncCanonicalCourse();
+  const payload={title:course.metadata.title,direction:state.direction,course};
+  const response=await fetch("/api/v1/projects",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+  if(!response.ok) throw new Error("Không thể lưu bản nháp bài giảng.");
+  state.project=await response.json();
+  state.generated.course=state.project.course;
+}
+
+function scheduleSave(){
+  if(!state.project)return;
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>persistGenerated().catch(()=>{}),700);
+}
+
+async function persistGenerated(){
+  if(!state.project)return;
+  const course=syncCanonicalCourse();
+  const expected=state.project.revision;
+  course.revision=expected+1;
+  const response=await fetch(`/api/v1/projects/${state.project.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({expected_revision:expected,course})});
+  if(response.status===409) throw new Error("Bản nháp đã được cập nhật ở phiên khác. Hãy tải lại bài giảng.");
+  if(!response.ok) throw new Error("Không thể lưu thay đổi bài giảng.");
+  state.project=await response.json();
+  state.generated.course=state.project.course;
+}
 
 function renderAI(){
   const g=state.generated;
@@ -70,9 +118,9 @@ function renderReview(){
     <div class="review-objectives"><h3>Mục tiêu bài học</h3>${g.objectives.map((o,i)=>`<input data-obj="${i}" value="${escapeHtml(o)}">`).join("")}</div>
     ${g.sections.map((s,i)=>`<div class="review-section"><div class="row"><input data-sec-title="${i}" value="${escapeHtml(s.title)}"><textarea data-sec-content="${i}">${escapeHtml(s.content)}</textarea></div></div>`).join("")}
   `;
-  document.querySelectorAll("[data-obj]").forEach(el=>el.addEventListener("input",()=>{g.objectives[Number(el.dataset.obj)]=el.value;}));
-  document.querySelectorAll("[data-sec-title]").forEach(el=>el.addEventListener("input",()=>{g.sections[Number(el.dataset.secTitle)].title=el.value;}));
-  document.querySelectorAll("[data-sec-content]").forEach(el=>el.addEventListener("input",()=>{g.sections[Number(el.dataset.secContent)].content=el.value;}));
+  document.querySelectorAll("[data-obj]").forEach(el=>el.addEventListener("input",()=>{g.objectives[Number(el.dataset.obj)]=el.value;scheduleSave();}));
+  document.querySelectorAll("[data-sec-title]").forEach(el=>el.addEventListener("input",()=>{g.sections[Number(el.dataset.secTitle)].title=el.value;scheduleSave();}));
+  document.querySelectorAll("[data-sec-content]").forEach(el=>el.addEventListener("input",()=>{g.sections[Number(el.dataset.secContent)].content=el.value;scheduleSave();}));
 }
 
 const quizTypeLabels={single:"Một đáp án",multiple:"Nhiều đáp án",truefalse:"Đúng / Sai",fill:"Điền từ",matching:"Ghép đôi",ordering:"Sắp xếp",dragdrop:"Kéo thả",image:"Chọn hình ảnh"};
@@ -89,15 +137,15 @@ function renderQuiz(){
       </div>
       <p>Đáp án gợi ý: ${escapeHtml(q.answer)}</p>
     </div>`).join("");
-  document.querySelectorAll("[data-qcheck]").forEach(el=>el.addEventListener("change",()=>{g.quizzes[Number(el.dataset.qcheck)].selected=el.checked;updateQuizCount();}));
-  document.querySelectorAll("[data-qtype]").forEach(el=>el.addEventListener("change",()=>{g.quizzes[Number(el.dataset.qtype)].quiz_type=el.value;}));
+  document.querySelectorAll("[data-qcheck]").forEach(el=>el.addEventListener("change",()=>{g.quizzes[Number(el.dataset.qcheck)].selected=el.checked;updateQuizCount();scheduleSave();}));
+  document.querySelectorAll("[data-qtype]").forEach(el=>el.addEventListener("change",()=>{g.quizzes[Number(el.dataset.qtype)].quiz_type=el.value;scheduleSave();}));
   updateQuizCount();
 }
 function updateQuizCount(){
   const count=state.generated?state.generated.quizzes.filter(q=>q.selected).length:0;
   document.getElementById("quizCount").textContent=`${count} câu được chọn`;
 }
-document.getElementById("selectAll").onclick=()=>{if(!state.generated)return;state.generated.quizzes.forEach(q=>q.selected=true);renderQuiz();};
+document.getElementById("selectAll").onclick=()=>{if(!state.generated)return;state.generated.quizzes.forEach(q=>q.selected=true);renderQuiz();scheduleSave();};
 
 function refreshPreview(){
   const title=document.getElementById("lessonTitle").value||"Bài học";
@@ -114,6 +162,7 @@ function refreshExportName(){document.getElementById("exportName").textContent=`
 async function exportScorm(){
   const status=document.getElementById("exportStatus");
   if(!state.generated){status.textContent="Chưa có nội dung để xuất. Hãy chạy Task 03 trước.";return;}
+  try{await persistGenerated();}catch(e){status.textContent=e.message;return;}
   const payload={
     title:document.getElementById("lessonTitle").value||"Bài học",
     direction:state.generated.direction_name,

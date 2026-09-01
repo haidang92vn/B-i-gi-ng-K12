@@ -71,6 +71,9 @@ class PrototypeTests(unittest.TestCase):
         project = created.json()
         self.assertEqual(project["course"]["metadata"]["title"], title)
         self.assertEqual(project["course"]["revision"], 1)
+        uploaded = client.post(f"/api/v1/projects/{project['id']}/sources", files={"upload": ("lesson.txt", b"Noi dung bai hoc", "text/plain")})
+        self.assertEqual(uploaded.status_code, 201, uploaded.text)
+        self.assertEqual(uploaded.json()["extracted_text"], "Noi dung bai hoc")
 
         updated_course = project["course"]
         updated_course["revision"] = 2
@@ -95,6 +98,7 @@ class PrototypeTests(unittest.TestCase):
         })
         forbidden = other_client.get(f"/api/v1/projects/{project['id']}")
         self.assertEqual(forbidden.status_code, 404, forbidden.text)
+        self.assertEqual(other_client.get(f"/api/v1/projects/{project['id']}/sources").json(), [])
 
 
 if __name__ == "__main__":

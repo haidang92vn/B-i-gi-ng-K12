@@ -1,5 +1,5 @@
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Response, status
+from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 
 from prototype.course_models import Course, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
-from prototype.persistence import AuthSession, Project, User, create_schema, make_session_factory
+from prototype.persistence import AuthSession, Project, SourceMaterial, User, create_schema, make_session_factory
+from prototype.sources import extract_text, validate_upload
+from prototype.storage import Storage
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "app"
@@ -21,6 +23,7 @@ engine, SessionLocal = make_session_factory()
 create_schema(engine)
 
 app = FastAPI(title="AI SCORM Studio Demo")
+storage = Storage()
 
 
 def get_db():
@@ -61,6 +64,9 @@ class TeacherResponse(BaseModel):
     email: str
     full_name: str | None
     school_name: str | None
+
+class SourceResponse(BaseModel):
+    id: str; original_name: str; mime_type: str; byte_size: int; extracted_text: str | None
 
 
 class ProjectUpdateRequest(BaseModel):
@@ -368,6 +374,24 @@ def delete_project(project_id: str, user: User = Depends(current_teacher), db: S
     project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
     if project is None: raise HTTPException(status_code=404, detail="Project not found.")
     db.delete(project); db.commit()
+
+@app.post("/api/v1/projects/{project_id}/sources", response_model=SourceResponse, status_code=status.HTTP_201_CREATED)
+async def upload_source(project_id: str, upload: UploadFile = File(...), user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
+    if project is None: raise HTTPException(status_code=404, detail="Project not found.")
+    content = await upload.read()
+    try: validate_upload(upload.filename or "", upload.content_type or "", content)
+    except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+    import hashlib, uuid
+    key = f"users/{user.id}/projects/{project_id}/source/{uuid.uuid4()}-{hashlib.sha256((upload.filename or '').encode()).hexdigest()[:12]}"
+    storage.put(key, content, upload.content_type or "application/octet-stream")
+    source = SourceMaterial(user_id=user.id, project_id=project_id, original_name=upload.filename or "source", mime_type=upload.content_type or "", byte_size=len(content), storage_key=key, extracted_text=extract_text(upload.content_type or "", content))
+    db.add(source); db.commit(); db.refresh(source)
+    return SourceResponse(id=source.id, original_name=source.original_name, mime_type=source.mime_type, byte_size=source.byte_size, extracted_text=source.extracted_text)
+
+@app.get("/api/v1/projects/{project_id}/sources", response_model=list[SourceResponse])
+def list_sources(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    return [SourceResponse(id=x.id, original_name=x.original_name, mime_type=x.mime_type, byte_size=x.byte_size, extracted_text=x.extracted_text) for x in db.scalars(select(SourceMaterial).where(SourceMaterial.project_id == project_id, SourceMaterial.user_id == user.id)).all()]
 
 def scorm_manifest(title: str):
     safe_title = html.escape(title)

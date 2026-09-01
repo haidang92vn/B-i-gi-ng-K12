@@ -88,6 +88,10 @@ Các API hiện có: `GET/POST /api/v1/projects`, `GET/PATCH /api/v1/projects/{p
 
 Prototype now provides registration, login, logout and revocable opaque browser sessions. Passwords use Argon2id; the session token is only issued in an HttpOnly cookie. Project endpoints always resolve the owner from that session, so one teacher cannot read or change another teacher's project. The local demo includes “Bài giảng của tôi” for opening, copying, archiving and deleting projects.
 
+## Milestone 03: source material and Cloudflare R2
+
+Authenticated teachers can upload TXT, PDF, DOCX and PPTX source materials up to 25 MB. The API validates the type/size, keeps only metadata and normalized extracted text in PostgreSQL, and sends file bytes to the configured S3-compatible object store. Configure `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` for Cloudflare R2. Local development uses a system temporary directory as a storage mock and never exposes storage credentials to the browser.
+
 ## Cấu trúc repository thực tế
 
 ```text

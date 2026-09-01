@@ -61,6 +61,7 @@ async function generateAI(){
   }
 }
 document.getElementById("generateBtn").onclick=generateAI;
+sourceFile.onchange=async()=>{if(!sourceFile.files[0]||!state.project){sourceFileStatus.textContent='Hãy tạo hoặc mở một bài giảng trước khi tải học liệu.';return;}const form=new FormData();form.append('upload',sourceFile.files[0]);const r=await fetch(`/api/v1/projects/${state.project.id}/sources`,{method:'POST',body:form});const data=await r.json();if(r.ok){sourceFileStatus.textContent=`Đã tải ${data.original_name}.`;if(data.extracted_text)sourceText.value=data.extracted_text;}else sourceFileStatus.textContent=data.detail||'Không tải được tệp.';};
 
 function syncCanonicalCourse(){
   const g=state.generated;if(!g || !g.course)return null;

@@ -40,6 +40,7 @@ REQUIRED_FILES = [
     "docs/SECURITY.md",
     "docs/SCORM.md",
     "docs/DEPLOYMENT.md",
+    "docs/RESTORE_DRILL.md",
     "docs/DECISIONS.md",
     "docs/UX_FLOW.md",
     "schemas/course.schema.json",
@@ -49,6 +50,16 @@ REQUIRED_FILES = [
     "prototype/app/index.html",
     "prototype/app/app.js",
     "prototype/app/styles.css",
+    "prototype/logging_config.py",
+    "prototype/worker.py",
+    "Dockerfile",
+    "Dockerfile.backup",
+    "docker-compose.yml",
+    "Caddyfile",
+    "ops/backup-postgres.sh",
+    "ops/backup-loop.sh",
+    "ops/restore-postgres.sh",
+    "ops/r2_backup.py",
 ]
 
 SECRET_MARKERS = [

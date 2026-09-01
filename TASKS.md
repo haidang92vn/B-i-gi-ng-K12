@@ -125,13 +125,13 @@ Acceptance:
 - real LMS test results are documented.
 
 ## Milestone 11 — Production deployment [P1]
-- [ ] Docker Compose production stack.
-- [ ] HTTPS/domain.
-- [ ] PostgreSQL backup to off-site object storage.
-- [ ] health/readiness checks.
-- [ ] log redaction.
-- [ ] basic monitoring.
-- [ ] restore drill documentation.
+- [x] Docker Compose production stack.
+- [x] HTTPS/domain.
+- [x] PostgreSQL backup to off-site object storage.
+- [x] health/readiness checks.
+- [x] log redaction.
+- [x] basic monitoring.
+- [x] restore drill documentation.
 
 ## Milestone 12 — Quality & advanced features [P1/P2]
 - [ ] AI quality checker.

@@ -15,8 +15,13 @@ from sqlalchemy.types import JSON
 def database_url() -> str:
     # SQLite is intentionally limited to the local prototype/test experience.
     # Deployment must set DATABASE_URL to a PostgreSQL URL from .env.example.
+    configured = os.getenv("DATABASE_URL")
+    if configured:
+        return configured
+    if os.getenv("APP_ENV", "development").lower() in {"production", "prod"}:
+        raise RuntimeError("DATABASE_URL is required when APP_ENV=production.")
     local_database = Path(__file__).resolve().parent / "storage" / "scorm-studio.db"
-    return os.getenv("DATABASE_URL", f"sqlite+pysqlite:///{local_database.as_posix()}")
+    return f"sqlite+pysqlite:///{local_database.as_posix()}"
 
 
 class Base(DeclarativeBase):

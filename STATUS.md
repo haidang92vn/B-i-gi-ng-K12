@@ -28,16 +28,15 @@ architecture. It is **not yet the production application**.
 - HTML5 player preview renders directly from the canonical project through the same renderer used by SCORM export. It includes progress, menu, fullscreen, responsive layouts, navigation restrictions and escaping for both HTML text and JSON embedded in scripts.
 - SCORM runtime tracks location, suspend data, progress, score, completion, success and session time. A fake `API_1484_11` harness verifies resume and the independence of completion/success without an LMS.
 - SCORM export validates manifest, root files, launch resource, runtime and configuration before packaging. Ready packages are stored in R2-compatible storage with per-teacher export metadata; manual K12Online/SCORM Cloud verification uses `docs/LMS_COMPATIBILITY_TEST.md`.
+- Production deployment artifacts include a Caddy HTTPS reverse proxy, FastAPI API, Redis, PostgreSQL, an explicit Alembic migration job, a reserved Redis worker and a daily encrypted PostgreSQL backup service to a separate R2 bucket. Liveness/readiness endpoints, structured secret-redacted logs, monitoring guidance and a quarterly restore drill are documented in `docs/DEPLOYMENT.md` and `docs/RESTORE_DRILL.md`.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 
 ### Not implemented yet
 
-- Production Next.js frontend.
 - Production PostgreSQL project library (the local prototype uses SQLite; deployment must run the Alembic migration against PostgreSQL).
 - Full quiz renderers for matching/ordering/drag-drop/image interactions.
-- Background job queue/workers.
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
-- Production Docker Compose deployment.
+- A production Next.js frontend and actual background-job handlers (the current Compose worker only validates Redis connectivity).
 
 Follow `TASKS.md` and the numbered files in `prompts/` to implement these in order.

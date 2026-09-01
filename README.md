@@ -116,6 +116,15 @@ Teachers can select or unselect AI-generated questions without deleting them, th
 
 Use **Mở player HTML5** at the build step to preview the authenticated project. The player is rendered directly from canonical `course.json`, and the same `build_course_html` renderer is written to a SCORM export. It provides previous/next controls, progress, optional menu, fullscreen, responsive styling, navigation modes and reusable slide layouts. Authored text is HTML-escaped and JSON inserted into inline scripts escapes tag delimiters, preventing authored content from executing as script.
 
+## Milestone 11: production deployment
+
+The repository now includes `docker-compose.yml`, Caddy HTTPS configuration, explicit Alembic
+migrations, health/readiness checks, secret-redacted JSON logs and a daily encrypted PostgreSQL
+backup service to a separate Cloudflare R2 bucket. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for
+the VPS release procedure and [docs/RESTORE_DRILL.md](docs/RESTORE_DRILL.md) for the required
+quarterly recovery drill. This ships the current FastAPI-served prototype UI; a production Next.js
+frontend and actual background-job handlers remain separate work.
+
 ## Cấu trúc repository thực tế
 
 ```text

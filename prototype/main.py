@@ -5,9 +5,9 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Literal, Optional
 from pathlib import Path
-import io, zipfile, html, json, re
+import io, zipfile, html, json, os, re
 from xml.etree import ElementTree
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 
 from prototype.course_models import Course, Slide, new_course
@@ -17,16 +17,20 @@ from prototype.persistence import AICredential, AuthSession, ExportRecord, Gener
 from prototype.providers import ProviderError, ProviderResult, provider_for
 from prototype.sources import extract_text, validate_upload
 from prototype.storage import Storage
+from prototype.logging_config import configure_logging
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "app"
 
-BASE_DIR.joinpath("storage").mkdir(exist_ok=True)
+if os.getenv("APP_ENV", "development").lower() not in {"production", "prod"}:
+    BASE_DIR.joinpath("storage").mkdir(exist_ok=True)
 engine, SessionLocal = make_session_factory()
-create_schema(engine)
+if os.getenv("APP_ENV", "development").lower() not in {"production", "prod"}:
+    create_schema(engine)
 
 app = FastAPI(title="AI SCORM Studio Demo")
 storage = Storage()
+configure_logging()
 
 
 def get_db():
@@ -35,6 +39,30 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+@app.get("/healthz")
+def healthz():
+    """Liveness probe: the API process is accepting requests."""
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readyz(db: Session = Depends(get_db)):
+    """Readiness probe: core persistent dependencies are reachable."""
+    dependencies: dict[str, str] = {}
+    try:
+        db.execute(text("SELECT 1"))
+        dependencies["database"] = "ok"
+    except Exception:
+        dependencies["database"] = "unavailable"
+    try:
+        dependencies["object_storage"] = storage.healthcheck()
+    except Exception:
+        dependencies["object_storage"] = "unavailable"
+    if "unavailable" in dependencies.values():
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "dependencies": dependencies})
+    return {"status": "ok", "dependencies": dependencies}
 
 
 def current_teacher(session_token: str | None = Cookie(default=None, alias=COOKIE_NAME), db: Session = Depends(get_db)) -> User:

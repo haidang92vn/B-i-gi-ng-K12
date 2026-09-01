@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -11,6 +13,8 @@ from jsonschema import Draft202012Validator
 from prototype.course_models import Question
 from prototype.quiz_scoring import score_question
 from prototype.scorm_runtime import FakeScorm2004API, ScormRuntime
+from prototype.logging_config import redact
+from prototype.persistence import database_url
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -76,6 +80,24 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(result["direction_name"], "Bài học mới")
         self.assertGreaterEqual(len(result["sections"]), 4)
         self.assertGreaterEqual(len(result["quizzes"]), 1)
+
+    def test_health_and_readiness_are_available_for_deployment_probes(self):
+        client = TestClient(self.module.app)
+        self.assertEqual(client.get("/healthz").json(), {"status": "ok"})
+        readiness = client.get("/readyz")
+        self.assertEqual(readiness.status_code, 200, readiness.text)
+        self.assertEqual(readiness.json()["dependencies"]["database"], "ok")
+
+    def test_log_redaction_hides_common_secret_shapes(self):
+        line = redact("Authorization: Bearer secret-value Cookie: session=abc api_key=sk-123456789")
+        self.assertNotIn("secret-value", line)
+        self.assertNotIn("session=abc", line)
+        self.assertNotIn("sk-123456789", line)
+
+    def test_production_requires_explicit_postgres_database_url(self):
+        with patch.dict(os.environ, {"APP_ENV": "production"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "DATABASE_URL"):
+                database_url()
 
     def test_scorm_manifest_has_root_sco(self):
         manifest = self.module.scorm_manifest("Validation")

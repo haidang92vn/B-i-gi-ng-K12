@@ -108,6 +108,10 @@ At the teacher-review step, **Tạo lại phần này** replaces only the chosen
 
 The review step is now the course editor: teachers edit objectives and slide text, choose a reusable layout (`content`, `two_column`, `callout`, `quiz`), set `AI nháp` / `Đã sửa` / `Đã duyệt`, and add, delete, duplicate or reorder slides. Changes are debounced and saved with optimistic revisions. The editor reports a save conflict or network failure while keeping the unsaved values in the current browser session for recovery.
 
+## Milestone 07: quiz bank and deterministic scoring
+
+Teachers can select or unselect AI-generated questions without deleting them, then edit the question, options, answer, explanation, feedback, score, difficulty and linked learning objectives. The canonical `question_bank` persists all these fields. `prototype/quiz_scoring.py` provides deterministic exact-match scoring for single choice, multiple choice, true/false, fill, matching and ordering. Drag/drop and image interaction rendering are intentionally deferred to the player work.
+
 ## Cấu trúc repository thực tế
 
 ```text

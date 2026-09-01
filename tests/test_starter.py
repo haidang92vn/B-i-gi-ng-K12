@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
+from prototype.course_models import Question
+from prototype.quiz_scoring import score_question
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,6 +28,17 @@ class CourseContractTests(unittest.TestCase):
         schema = json.loads((ROOT / "schemas/course.schema.json").read_text(encoding="utf-8"))
         example = json.loads((ROOT / "examples/course.example.json").read_text(encoding="utf-8"))
         Draft202012Validator(schema).validate(example)
+
+    def test_quiz_scoring_is_deterministic(self):
+        def question(kind, correct):
+            return Question(id="q", type=kind, question="Kiểm tra", selected=True, score=2,
+                            difficulty="understand", correct_answer=correct)
+        self.assertEqual(score_question(question("single", "Đáp án A"), " đáp án a "), (True, 2))
+        self.assertEqual(score_question(question("multiple", ["A", "C"]), ["c", "a"]), (True, 2))
+        self.assertEqual(score_question(question("multiple", ["A", "C"]), ["A"]), (False, 0.0))
+        self.assertEqual(score_question(question("fill", "Quang hợp"), "quang HỢP"), (True, 2))
+        self.assertEqual(score_question(question("matching", {"A": "1", "B": "2"}), {"b": "2", "a": "1"}), (True, 2))
+        self.assertEqual(score_question(question("ordering", ["Một", "Hai"]), ["Hai", "Một"]), (False, 0.0))
 
 
 class PrototypeTests(unittest.TestCase):
@@ -98,6 +111,23 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual([slide["id"] for slide in saved.json()["course"]["slides"]], list(reversed(original_ids)))
         stale = client.patch(f"/api/v1/projects/{project['id']}", json={"expected_revision": 1, "course": reordered})
         self.assertEqual(stale.status_code, 409, stale.text)
+
+    def test_quiz_selection_and_authoring_fields_persist(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"teacher-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        generated = client.post("/api/generate", json={"title": "Bài Quiz", "source": "Ý một. Ý hai.", "provider": "mock"}).json()
+        project = client.post("/api/v1/projects", json={"title": "Bài Quiz", "direction": "lesson", "course": generated["course"]}).json()
+        course = project["course"]
+        course["revision"] = 2
+        question = course["question_bank"][0]
+        question.update({"selected": False, "score": 2.5, "difficulty": "apply", "objective_ids": ["o1"], "explanation": "Vì đây là ý chính.", "feedback_correct": "Tốt.", "feedback_incorrect": "Xem lại nội dung."})
+        saved = client.patch(f"/api/v1/projects/{project['id']}", json={"expected_revision": 1, "course": course})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        restored = client.get(f"/api/v1/projects/{project['id']}").json()["course"]["question_bank"][0]
+        self.assertFalse(restored["selected"])
+        self.assertEqual(restored["score"], 2.5)
+        self.assertEqual(restored["objective_ids"], ["o1"])
+        self.assertEqual(restored["feedback_correct"], "Tốt.")
 
     def test_project_course_persists_and_revision_conflicts_are_rejected(self):
         client = TestClient(self.module.app)

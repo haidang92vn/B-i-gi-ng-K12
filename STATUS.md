@@ -24,6 +24,7 @@ architecture. It is **not yet the production application**.
 - Lesson, review and advanced AI storyboarding with a larger question bank than the initially selected quiz set; per-slide regeneration preserves other slides and rejects overwriting approved slides.
 - Non-sensitive generation metadata (provider, model, request ID and token counts when supplied) is stored in `generation_runs` and linked to the created project.
 - Course editor supports objectives and slide editing, add/delete/duplicate/reorder, reusable layout IDs, and `ai_draft`/`edited`/`approved` states. Debounced autosave reports conflict/failure instead of discarding unsaved work.
+- Quiz bank editor persists question text, options, answer, explanation, feedback, score, difficulty, objective links and selected state. Deterministic exact-match scoring supports single/multiple choice, true/false, fill, matching and ordering; drag/drop and image interactions remain deferred.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 

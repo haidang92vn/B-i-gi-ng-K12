@@ -76,11 +76,11 @@ Acceptance:
 - reordering persists.
 
 ## Milestone 07 — Quiz bank + quiz editor [P0]
-- [ ] Select/unselect generated questions.
-- [ ] Edit stem/options/answer/explanation/feedback/score.
-- [ ] Difficulty + objective linkage.
-- [ ] Priority 1 renderers: single, multiple, true/false, fill.
-- [ ] Priority 2: matching, ordering.
+- [x] Select/unselect generated questions.
+- [x] Edit stem/options/answer/explanation/feedback/score.
+- [x] Difficulty + objective linkage.
+- [x] Priority 1 renderers: single, multiple, true/false, fill.
+- [x] Priority 2: matching, ordering.
 - [ ] Priority 3: drag/drop, image interactions.
 
 Acceptance:

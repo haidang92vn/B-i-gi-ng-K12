@@ -77,6 +77,19 @@ class SourceMaterial(Base):
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+class AICredential(Base):
+    __tablename__ = "ai_credentials"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(30))
+    label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    encrypted_secret: Mapped[str] = mapped_column(Text)
+    secret_last4: Mapped[str] = mapped_column(String(4))
+    model_default: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 
 def make_session_factory(url: str | None = None):
     selected_url = url or database_url()

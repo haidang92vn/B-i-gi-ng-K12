@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div id="authGate" class="auth-gate"><form id="authForm" class="auth-card"><h1>AI SCORM Studio</h1><p>Đăng nhập để mở thư viện bài giảng của bạn.</p><input id="authEmail" type="email" placeholder="Email" required><input id="authPassword" type="password" minlength="12" placeholder="Mật khẩu (ít nhất 12 ký tự)" required><button class="primary">Đăng nhập / Đăng ký</button><small id="authMessage"></small></form></div>
+<div id="authGate" class="auth-gate"><form id="authForm" class="auth-card"><h1>AI SCORM Studio</h1><p>Đăng nhập để mở thư viện bài giảng của bạn. Email mới sẽ tự được tạo tài khoản.</p><input id="authEmail" type="email" placeholder="Email" autocomplete="email" required><input id="authPassword" type="password" minlength="12" placeholder="Mật khẩu (ít nhất 12 ký tự)" autocomplete="current-password" required><button class="primary">Đăng nhập / Tạo tài khoản</button><small id="authMessage" aria-live="polite"></small></form></div>
 <div class="app-shell">
   <aside class="sidebar">
     <div class="brand">
@@ -33,7 +33,7 @@
   <main>
     <header class="topbar">
       <div><span class="eyebrow">WORKFLOW DEMO</span><h1 id="pageTitle">Nhập nội dung bài học</h1></div>
-      <div class="status"><button class="ghost" id="libraryBtn">Bài giảng của tôi</button> <span class="dot"></span> Demo cục bộ</div>
+      <div class="status"><button class="ghost" id="credentialsBtn">AI API</button> <button class="ghost" id="libraryBtn">Bài giảng của tôi</button> <span class="dot"></span> Demo cục bộ</div>
     </header>
 
     <section class="workspace">
@@ -59,11 +59,11 @@
       <div class="panel page" data-page="3">
         <div class="panel-head"><div><h2>AI tạo cấu trúc bài giảng</h2><p>API cá nhân của giáo viên sẽ được gọi ở bước này.</p></div><span class="badge">TASK 03</span></div>
         <div class="api-box">
-          <div><label>Nhà cung cấp API</label><select id="provider"><option value="mock">Mock AI (Demo)</option><option value="custom">Custom Provider</option></select></div>
-          <div><label>API key</label><input id="apiKey" type="password" placeholder="Không cần nhập trong demo"></div>
+          <div><label>Nhà cung cấp API</label><select id="provider"><option value="mock">Mock AI (Demo)</option><option value="openai">OpenAI (ChatGPT)</option><option value="gemini">Google Gemini</option></select></div>
+          <div><label>API key đã lưu<select id="generationCredential" disabled><option value="">Mock AI không cần API key</option></select></label></div>
           <button id="generateBtn" class="primary">Tạo nội dung bằng AI</button>
         </div>
-        <div class="security-note">Demo không lưu API key. Bản production cần xử lý khóa API phía backend và không ghi log.</div>
+        <div class="security-note">Chọn API key đã lưu ở nút “AI API”. Khóa chỉ được mã hóa và dùng ở backend; trình duyệt không nhận lại khóa đã lưu.</div>
         <div id="aiOutput" class="empty-state"><div class="spark">✦</div><strong>Chưa tạo nội dung</strong><p>Nhấn nút để sinh mục tiêu, cấu trúc bài và ngân hàng câu hỏi.</p></div>
       </div>
 
@@ -130,6 +130,7 @@
   </main>
 </div>
 <aside id="libraryDrawer" class="library-drawer"><div class="library-head"><h2>Bài giảng của tôi</h2><button class="ghost" id="closeLibraryBtn">Đóng</button></div><button class="primary" id="newLessonBtn">Bài giảng mới</button><div id="libraryList"></div></aside>
+<aside id="credentialsDrawer" class="library-drawer"><div class="library-head"><h2>API AI của tôi</h2><button class="ghost" id="closeCredentialsBtn">Đóng</button></div><form id="credentialForm"><label>Provider<select id="credentialProvider"><option value="openai">OpenAI (ChatGPT)</option><option value="gemini">Google Gemini</option></select></label><label>API key<input id="credentialSecret" type="password" required></label><label>Model mặc định<input id="credentialModel" placeholder="Tùy chọn"></label><button class="primary">Lưu key mã hóa</button></form><div id="credentialsList"></div></aside>
 <script src="app.js"></script>
 </body>
 </html>

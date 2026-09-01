@@ -39,12 +39,12 @@ Acceptance:
 - deleting a project follows defined asset-retention policy.
 
 ## Milestone 04 — Teacher AI credentials + provider adapters [P0]
-- [ ] Credential CRUD without revealing plaintext secret.
-- [ ] Encrypt credentials at rest.
-- [ ] Provider-neutral AI interface.
-- [ ] Mock provider remains available for tests.
-- [ ] Add first real provider.
-- [ ] Structured output validation/retry.
+- [x] Credential CRUD without revealing plaintext secret.
+- [x] Encrypt credentials at rest.
+- [x] Provider-neutral AI interface.
+- [x] Mock provider remains available for tests.
+- [x] Add first real provider (OpenAI and Gemini).
+- [x] Structured output validation/retry.
 
 Acceptance:
 - browser never receives stored secret;

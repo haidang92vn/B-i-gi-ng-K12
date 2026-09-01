@@ -2,7 +2,7 @@
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing import List, Literal, Optional
 from pathlib import Path
 import io, zipfile, html, json, re
@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 
 from prototype.course_models import Course, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
-from prototype.persistence import AuthSession, Project, SourceMaterial, User, create_schema, make_session_factory
+from prototype.credentials import decrypt, encrypt
+from prototype.persistence import AICredential, AuthSession, Project, SourceMaterial, User, create_schema, make_session_factory
+from prototype.providers import ProviderError, provider_for
 from prototype.sources import extract_text, validate_upload
 from prototype.storage import Storage
 
@@ -67,6 +69,17 @@ class TeacherResponse(BaseModel):
 
 class SourceResponse(BaseModel):
     id: str; original_name: str; mime_type: str; byte_size: int; extracted_text: str | None
+class CredentialCreateRequest(BaseModel):
+    provider: Literal["openai", "gemini"]
+    secret: str = Field(min_length=8, max_length=500)
+    label: str | None = Field(default=None, max_length=100)
+    model_default: str | None = Field(default=None, max_length=100)
+class CredentialResponse(BaseModel):
+    id: str; provider: str; label: str | None; secret_last4: str; model_default: str | None; status: str
+class CredentialUpdateRequest(BaseModel):
+    label: str | None = Field(default=None, max_length=100)
+    secret: str | None = Field(default=None, min_length=8, max_length=500)
+    model_default: str | None = Field(default=None, max_length=100)
 
 
 class ProjectUpdateRequest(BaseModel):
@@ -148,12 +161,45 @@ def refresh_session(response: Response, session_token: str | None = Cookie(defau
 def me(user: User = Depends(current_teacher)):
     return serialize_teacher(user)
 
+def credential_response(item: AICredential) -> CredentialResponse:
+    return CredentialResponse(id=item.id, provider=item.provider, label=item.label, secret_last4=item.secret_last4, model_default=item.model_default, status=item.status)
+
+@app.get("/api/v1/ai/credentials", response_model=list[CredentialResponse])
+def list_credentials(user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    return [credential_response(x) for x in db.scalars(select(AICredential).where(AICredential.user_id == user.id, AICredential.status == "active")).all()]
+
+@app.post("/api/v1/ai/credentials", response_model=CredentialResponse, status_code=status.HTTP_201_CREATED)
+def create_credential(payload: CredentialCreateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    item = AICredential(user_id=user.id, provider=payload.provider, label=payload.label, encrypted_secret=encrypt(payload.secret), secret_last4=payload.secret[-4:], model_default=payload.model_default)
+    db.add(item); db.commit(); db.refresh(item)
+    return credential_response(item)
+
+@app.patch("/api/v1/ai/credentials/{credential_id}", response_model=CredentialResponse)
+def update_credential(credential_id: str, payload: CredentialUpdateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    item = db.scalar(select(AICredential).where(AICredential.id == credential_id, AICredential.user_id == user.id, AICredential.status == "active"))
+    if item is None:
+        raise HTTPException(status_code=404, detail="Credential not found.")
+    if "label" in payload.model_fields_set:
+        item.label = payload.label
+    if "model_default" in payload.model_fields_set:
+        item.model_default = payload.model_default
+    if payload.secret is not None:
+        item.encrypted_secret, item.secret_last4 = encrypt(payload.secret), payload.secret[-4:]
+    db.commit(); db.refresh(item)
+    return credential_response(item)
+
+@app.delete("/api/v1/ai/credentials/{credential_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_credential(credential_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    item = db.scalar(select(AICredential).where(AICredential.id == credential_id, AICredential.user_id == user.id))
+    if item is None: raise HTTPException(status_code=404, detail="Credential not found.")
+    item.status = "revoked"; db.commit()
+
 class GenerateRequest(BaseModel):
     title: str
     source: str
-    direction: str = "lesson"
-    provider: str = "mock"
-    api_key: Optional[str] = None
+    direction: Literal["lesson", "review", "advanced"] = "lesson"
+    provider: Literal["mock", "openai", "gemini"] = "mock"
+    credential_id: str | None = None
 
 class QuizItem(BaseModel):
     id: str
@@ -273,10 +319,69 @@ def make_mock_content(req: GenerateRequest):
     generated["course"] = Course.model_validate(course_data).model_dump(mode="json")
     return generated
 
+def generation_prompt(req: GenerateRequest) -> str:
+    return f"""Bạn là chuyên gia thiết kế bài giảng K-12 bằng tiếng Việt.
+Tạo MỘT đối tượng JSON Course hợp lệ theo JSON Schema được cung cấp.
+Chủ đề: {req.title!r}
+Định hướng: {req.direction}
+Nội dung nguồn: {req.source[:24000]}
+
+Yêu cầu tối thiểu: 3 mục tiêu, 4 slide có khối text và 4 câu hỏi. Nội dung
+chính xác theo nguồn, phù hợp học sinh; các slide có status ai_draft. Không
+thêm Markdown, lời giải thích hay thuộc tính ngoài schema. Dùng tiếng Việt."""
+
+
+def generated_response(course: Course, provider: str) -> dict:
+    direction_name = {"lesson": "Bài học mới", "review": "Ôn tập – củng cố", "advanced": "Nâng cao – mở rộng"}[course.metadata.direction]
+    sections = []
+    for slide in course.slides:
+        block = next((item for item in slide.blocks if item.type == "text"), None)
+        sections.append({"id": slide.id, "title": slide.title, "content": block.text if block and block.text else "", "note": slide.speaker_notes or "AI gợi ý – giáo viên có thể sửa trực tiếp."})
+    quizzes = [{"id": item.id, "question": item.question, "options": item.options,
+                "answer": str(item.correct_answer), "quiz_type": item.type, "selected": item.selected}
+               for item in course.question_bank]
+    return {"direction_name": direction_name, "objectives": [item.text for item in course.objectives],
+            "sections": sections, "quizzes": quizzes, "course": course.model_dump(mode="json"),
+            "notice": f"Đã tạo nội dung bằng {provider}. Giáo viên cần duyệt trước khi xuất bản."}
+
+
+def generate_real_content(req: GenerateRequest, credential: AICredential) -> dict:
+    adapter = provider_for(credential.provider, api_key=decrypt(credential.encrypted_secret), model=credential.model_default)
+    prompt = generation_prompt(req)
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            course = Course.model_validate(adapter.generate_structured(prompt=prompt, schema=Course.model_json_schema()))
+            course.metadata.title = req.title or course.metadata.title
+            course.metadata.direction = req.direction
+            course.revision = 1
+            if len(course.objectives) < 3 or len(course.slides) < 4 or len(course.question_bank) < 4:
+                raise ValueError("Course does not meet the minimum authoring requirements.")
+            return generated_response(course, credential.provider)
+        except ProviderError:
+            raise
+        except (ValidationError, ValueError, TypeError) as exc:
+            last_error = exc
+            prompt += "\nLần trước bị từ chối vì không đúng schema hoặc thiếu mục bắt buộc. Hãy trả lại JSON Course hợp lệ, đầy đủ."
+    raise HTTPException(status_code=502, detail="AI trả về dữ liệu chưa hợp lệ sau 2 lần thử. Hãy thử lại.") from last_error
+
+
 @app.post("/api/generate")
-def generate(req: GenerateRequest):
-    # Demo: không lưu API key. Production sẽ thay bằng provider adapter server-side.
-    return make_mock_content(req)
+def generate(req: GenerateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    if req.provider == "mock":
+        return make_mock_content(req)
+    if not req.credential_id:
+        raise HTTPException(status_code=422, detail="Hãy chọn API key đã lưu cho nhà cung cấp này.")
+    credential = db.scalar(select(AICredential).where(
+        AICredential.id == req.credential_id, AICredential.user_id == user.id,
+        AICredential.provider == req.provider, AICredential.status == "active",
+    ))
+    if credential is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy API key đang hoạt động.")
+    try:
+        return generate_real_content(req, credential)
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail="Không thể gọi AI. Hãy kiểm tra API key, model và hạn mức rồi thử lại.") from exc
 
 
 @app.get("/api/v1/projects", response_model=list[ProjectResponse])

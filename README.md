@@ -92,6 +92,12 @@ Prototype now provides registration, login, logout and revocable opaque browser 
 
 Authenticated teachers can upload TXT, PDF, DOCX and PPTX source materials up to 25 MB. The API validates the type/size, keeps only metadata and normalized extracted text in PostgreSQL, and sends file bytes to the configured S3-compatible object store. Configure `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` for Cloudflare R2. Local development uses a system temporary directory as a storage mock and never exposes storage credentials to the browser.
 
+## Milestone 04: personal AI keys and provider adapters
+
+After signing in, open **AI API** in the prototype to save an OpenAI (ChatGPT) or Google Gemini API key. The server encrypts the key before writing it to the database; list and generation responses return only provider metadata and the last four characters. At Task 03, select the provider and one saved key. The browser sends only that credential ID, while the server decrypts the key only for the outbound provider request.
+
+Mock AI remains the no-cost default. Real provider output is requested as JSON, validated against the canonical `Course` Pydantic model and retried once when invalid. Set a unique `CREDENTIAL_ENCRYPTION_KEY` before production; startup refuses the local fallback when `APP_ENV=production`.
+
 ## Cấu trúc repository thực tế
 
 ```text

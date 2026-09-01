@@ -2,12 +2,32 @@
 let currentStep = 1;
 let state = { direction: "lesson", generated: null, project: null };
 let saveTimer = null;
-async function ensureAuth(){const r=await fetch('/api/v1/me');if(r.ok){document.getElementById('authGate').classList.add('hidden');}}
-document.getElementById('authForm').onsubmit=async e=>{e.preventDefault();const email=authEmail.value,password=authPassword.value;let r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});if(!r.ok)r=await fetch('/api/v1/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});if(r.ok){document.getElementById('authGate').classList.add('hidden');}else authMessage.textContent='Không thể đăng nhập. Kiểm tra email hoặc mật khẩu.';};ensureAuth();
+const authGate = document.getElementById('authGate');
+const authForm = document.getElementById('authForm');
+const authEmailInput = document.getElementById('authEmail');
+const authPasswordInput = document.getElementById('authPassword');
+const authMessage = document.getElementById('authMessage');
+async function ensureAuth(){const r=await fetch('/api/v1/me');if(r.ok)authGate.classList.add('hidden');}
+async function apiMessage(response){try{const body=await response.json();return typeof body.detail==='string'?body.detail:'';}catch{return '';}}
+authForm.onsubmit=async e=>{e.preventDefault();const email=authEmailInput.value.trim(),password=authPasswordInput.value;if(password.length<12){authMessage.textContent='Mật khẩu cần tối thiểu 12 ký tự.';return;}authMessage.textContent='Đang xác thực…';const body=JSON.stringify({email,password});let r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body});if(r.ok){authGate.classList.add('hidden');return;}if(r.status!==401){authMessage.textContent=(await apiMessage(r))||'Không thể kết nối máy chủ. Vui lòng thử lại.';return;}r=await fetch('/api/v1/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body});if(r.ok){authGate.classList.add('hidden');return;}if(r.status===409){authMessage.textContent='Email này đã được đăng ký; vui lòng kiểm tra lại mật khẩu.';return;}authMessage.textContent=(await apiMessage(r))||'Không thể tạo tài khoản. Vui lòng thử lại.';};ensureAuth();
 async function loadLibrary(){const r=await fetch('/api/v1/projects');if(!r.ok)return;const items=await r.json();libraryList.innerHTML=items.length?items.map(p=>`<article class="library-item"><strong>${escapeHtml(p.title)}</strong><small>${p.status} • phiên bản ${p.revision}</small><div class="library-actions"><button onclick="openProject('${p.id}')">Mở</button><button onclick="copyProject('${p.id}')">Nhân bản</button><button onclick="archiveProject('${p.id}')">Lưu trữ</button><button onclick="deleteProject('${p.id}')">Xóa</button></div></article>`).join(''):'<p class="hint">Chưa có bài giảng nào.</p>';}
 libraryBtn.onclick=()=>{libraryDrawer.classList.add('open');loadLibrary();};closeLibraryBtn.onclick=()=>libraryDrawer.classList.remove('open');
 newLessonBtn.onclick=()=>{libraryDrawer.classList.remove('open');state={direction:'lesson',generated:null,project:null};location.reload();};
 async function openProject(id){const r=await fetch(`/api/v1/projects/${id}`);if(!r.ok)return;state.project=await r.json();const c=state.project.course;state.direction=c.metadata.direction;lessonTitle.value=c.metadata.title;state.generated={course:c,direction_name:{lesson:'Bài học mới',review:'Ôn tập – củng cố',advanced:'Nâng cao – mở rộng'}[c.metadata.direction],objectives:c.objectives.map(x=>x.text),sections:c.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',note:s.speaker_notes||''})),quizzes:c.question_bank.map(q=>({id:q.id,question:q.question,options:q.options,answer:q.correct_answer,quiz_type:q.type,selected:q.selected}))};renderAI();renderReview();renderQuiz();libraryDrawer.classList.remove('open');setStep(4);}
+const credentialsBtn = document.getElementById('credentialsBtn');
+const credentialsDrawer = document.getElementById('credentialsDrawer');
+const credentialsList = document.getElementById('credentialsList');
+const credentialForm = document.getElementById('credentialForm');
+const credentialProvider = document.getElementById('credentialProvider');
+const credentialSecret = document.getElementById('credentialSecret');
+const credentialModel = document.getElementById('credentialModel');
+const generationProvider = document.getElementById('provider');
+const generationCredential = document.getElementById('generationCredential');
+let savedCredentials = [];
+function refreshGenerationCredentials(){const provider=generationProvider.value;const choices=savedCredentials.filter(x=>x.provider===provider);generationCredential.disabled=provider==='mock';generationCredential.innerHTML=provider==='mock'?'<option value="">Mock AI không cần API key</option>':(choices.length?choices.map(x=>`<option value="${x.id}">${escapeHtml(x.label||x.provider)} •••• ${x.secret_last4}${x.model_default?` (${escapeHtml(x.model_default)})`:''}</option>`).join(''):'<option value="">Chưa có key phù hợp — mở AI API để thêm</option>');}
+async function loadCredentials(){const r=await fetch('/api/v1/ai/credentials');if(!r.ok)return;savedCredentials=await r.json();credentialsList.innerHTML=savedCredentials.map(x=>`<article class="library-item"><strong>${escapeHtml(x.label||x.provider)}</strong><small>${x.provider} • •••• ${x.secret_last4} ${escapeHtml(x.model_default||'')}</small><div class="library-actions"><button onclick="revokeCredential('${x.id}')">Hủy key</button></div></article>`).join('')||'<p class="hint">Chưa có API key.</p>';refreshGenerationCredentials();}
+async function revokeCredential(id){if(!confirm('Hủy API key này? Key sẽ không thể dùng lại.'))return;const r=await fetch(`/api/v1/ai/credentials/${id}`,{method:'DELETE'});if(r.ok)await loadCredentials();else alert((await apiMessage(r))||'Không thể hủy API key.');}
+credentialsBtn.onclick=()=>{credentialsDrawer.classList.add('open');loadCredentials();};document.getElementById('closeCredentialsBtn').onclick=()=>credentialsDrawer.classList.remove('open');credentialForm.onsubmit=async e=>{e.preventDefault();const r=await fetch('/api/v1/ai/credentials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:credentialProvider.value,secret:credentialSecret.value,model_default:credentialModel.value||null})});if(r.ok){credentialSecret.value='';credentialModel.value='';await loadCredentials();}else{alert((await apiMessage(r))||'Không thể lưu API key.');}};generationProvider.onchange=refreshGenerationCredentials;loadCredentials();
 async function copyProject(id){await fetch(`/api/v1/projects/${id}/duplicate`,{method:'POST'});loadLibrary();}async function archiveProject(id){await fetch(`/api/v1/projects/${id}/archive`,{method:'POST'});loadLibrary();}async function deleteProject(id){if(confirm('Xóa bài giảng này?')){await fetch(`/api/v1/projects/${id}`,{method:'DELETE'});loadLibrary();}}
 
 const titles = ["Nhập nội dung bài học","Chọn định hướng","AI tạo nội dung","Giáo viên duyệt","Chọn dạng Quiz","Dựng bài giảng","Cấu hình SCORM","Kiểm tra & xuất"];
@@ -20,6 +40,7 @@ function setStep(n){
   document.getElementById("footerStep").textContent = `Bước ${currentStep}/8`;
   document.getElementById("backBtn").disabled = currentStep===1;
   document.getElementById("nextBtn").textContent = currentStep===8 ? "Hoàn tất" : "Tiếp tục →";
+  if(currentStep===3) loadCredentials();
   if(currentStep===6) refreshPreview();
   if(currentStep===8) refreshExportName();
 }
@@ -45,12 +66,12 @@ async function generateAI(){
     title:document.getElementById("lessonTitle").value || "Bài học",
     source:document.getElementById("sourceText").value,
     direction:state.direction,
-    provider:document.getElementById("provider").value,
-    api_key:document.getElementById("apiKey").value || null
+    provider:generationProvider.value,
+    credential_id:generationCredential.value || null
   };
   try{
     const r=await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-    if(!r.ok) throw new Error("Không gọi được dịch vụ tạo nội dung.");
+    if(!r.ok) throw new Error((await apiMessage(r))||"Không gọi được dịch vụ tạo nội dung.");
     state.generated=await r.json();
     await createProjectFromGenerated();
     renderAI(); renderReview(); renderQuiz();

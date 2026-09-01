@@ -66,6 +66,32 @@ class PrototypeTests(unittest.TestCase):
             "full_name": "Giáo viên kiểm thử",
         })
         self.assertEqual(registered.status_code, 201, registered.text)
+        secret = "sk-test-secret-value-1234"
+        credential = client.post("/api/v1/ai/credentials", json={"provider": "openai", "secret": secret, "label": "Test key"})
+        self.assertEqual(credential.status_code, 201, credential.text)
+        self.assertNotIn(secret, credential.text)
+        self.assertEqual(credential.json()["secret_last4"], "1234")
+        self.assertNotIn("encrypted_secret", client.get("/api/v1/ai/credentials").text)
+        renamed = client.patch(f"/api/v1/ai/credentials/{credential.json()['id']}", json={"label": "Đã đổi tên", "model_default": "test-model"})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertNotIn(secret, renamed.text)
+        mock_generated = client.post("/api/generate", json={"title": title, "source": "Nội dung kiểm thử. Có ví dụ.", "provider": "mock"})
+        self.assertEqual(mock_generated.status_code, 200, mock_generated.text)
+        self.assertIn("course", mock_generated.json())
+
+        request = self.module.GenerateRequest(title=title, source="Nguồn kiểm thử có đủ ngữ cảnh.", provider="openai")
+        attempts = [{"unexpected": "shape"}, self.module.make_mock_content(request)["course"]]
+        class RetryingProvider:
+            def generate_structured(self, **kwargs): return attempts.pop(0)
+        original_provider_for = self.module.provider_for
+        self.module.provider_for = lambda *args, **kwargs: RetryingProvider()
+        try:
+            generated = self.module.generate_real_content(request, self.module.AICredential(
+                user_id="test-user", provider="openai", encrypted_secret=self.module.encrypt(secret), secret_last4="1234"))
+        finally:
+            self.module.provider_for = original_provider_for
+        self.assertEqual(generated["course"]["metadata"]["title"], title)
+        self.assertEqual(attempts, [])
         created = client.post("/api/v1/projects", json={"title": title, "direction": "lesson"})
         self.assertEqual(created.status_code, 201, created.text)
         project = created.json()

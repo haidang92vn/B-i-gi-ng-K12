@@ -52,12 +52,12 @@ Acceptance:
 - invalid AI JSON is retried/rejected safely.
 
 ## Milestone 05 — AI analysis + storyboard [P0]
-- [ ] Lesson/review/advanced prompt strategies.
-- [ ] Generate objectives.
-- [ ] Generate slide storyboard.
-- [ ] Generate initial question bank.
-- [ ] Regenerate one section without regenerating whole course.
-- [ ] Cost/token usage metadata.
+- [x] Lesson/review/advanced prompt strategies.
+- [x] Generate objectives.
+- [x] Generate slide storyboard.
+- [x] Generate initial question bank.
+- [x] Regenerate one section without regenerating whole course.
+- [x] Cost/token usage metadata.
 
 Acceptance:
 - output validates to course schema;

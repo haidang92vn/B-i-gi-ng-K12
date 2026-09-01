@@ -9,11 +9,11 @@ import io, zipfile, html, json, re
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from prototype.course_models import Course, new_course
+from prototype.course_models import Course, Slide, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
 from prototype.credentials import decrypt, encrypt
-from prototype.persistence import AICredential, AuthSession, Project, SourceMaterial, User, create_schema, make_session_factory
-from prototype.providers import ProviderError, provider_for
+from prototype.persistence import AICredential, AuthSession, GenerationRun, Project, SourceMaterial, User, create_schema, make_session_factory
+from prototype.providers import ProviderError, ProviderResult, provider_for
 from prototype.sources import extract_text, validate_upload
 from prototype.storage import Storage
 
@@ -47,6 +47,7 @@ class ProjectCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     direction: Literal["lesson", "review", "advanced"] = "lesson"
     course: Course | None = None
+    generation_id: str | None = None
 
 
 class RegisterRequest(BaseModel):
@@ -201,6 +202,13 @@ class GenerateRequest(BaseModel):
     provider: Literal["mock", "openai", "gemini"] = "mock"
     credential_id: str | None = None
 
+
+class RegenerateSlideRequest(BaseModel):
+    source: str = Field(min_length=1, max_length=24000)
+    provider: Literal["mock", "openai", "gemini"] = "mock"
+    credential_id: str | None = None
+    expected_revision: int = Field(ge=1)
+
 class QuizItem(BaseModel):
     id: str
     question: str
@@ -271,7 +279,7 @@ def make_mock_content(req: GenerateRequest):
             "note": "AI gợi ý – giáo viên có thể sửa trực tiếp."
         })
 
-    qbase = source_sentences[:6] if len(source_sentences) >= 6 else (source_sentences * 6)[:6]
+    qbase = source_sentences[:8] if len(source_sentences) >= 8 else (source_sentences * 8)[:8]
     quizzes = []
     type_cycle = ["single", "multiple", "truefalse", "fill", "matching", "ordering"]
     for i, s in enumerate(qbase):
@@ -287,7 +295,7 @@ def make_mock_content(req: GenerateRequest):
             ],
             "answer": "Phương án đúng theo nội dung bài học",
             "quiz_type": type_cycle[i % len(type_cycle)],
-            "selected": True
+            "selected": i < 4
         })
 
     generated = {
@@ -320,15 +328,22 @@ def make_mock_content(req: GenerateRequest):
     return generated
 
 def generation_prompt(req: GenerateRequest) -> str:
+    strategies = {
+        "lesson": "Đi từ khởi động, hình thành kiến thức, ví dụ/vận dụng đến củng cố.",
+        "review": "Gợi nhớ kiến thức, hệ thống hóa, luyện tập theo lỗi thường gặp và tổng kết.",
+        "advanced": "Đặt vấn đề, mở rộng khái niệm, thử thách vận dụng và kết luận mở rộng.",
+    }
     return f"""Bạn là chuyên gia thiết kế bài giảng K-12 bằng tiếng Việt.
 Tạo MỘT đối tượng JSON Course hợp lệ theo JSON Schema được cung cấp.
 Chủ đề: {req.title!r}
 Định hướng: {req.direction}
 Nội dung nguồn: {req.source[:24000]}
 
+Chiến lược: {strategies[req.direction]}
 Yêu cầu tối thiểu: 3 mục tiêu, 4 slide có khối text và 4 câu hỏi. Nội dung
-chính xác theo nguồn, phù hợp học sinh; các slide có status ai_draft. Không
-thêm Markdown, lời giải thích hay thuộc tính ngoài schema. Dùng tiếng Việt."""
+chính xác theo nguồn, phù hợp học sinh; tạo ít nhất 6 câu hỏi nhưng chỉ chọn
+4 câu đầu cho quiz cuối; các slide có status ai_draft. Không thêm Markdown,
+lời giải thích hay thuộc tính ngoài schema. Dùng tiếng Việt."""
 
 
 def generated_response(course: Course, provider: str) -> dict:
@@ -345,19 +360,35 @@ def generated_response(course: Course, provider: str) -> dict:
             "notice": f"Đã tạo nội dung bằng {provider}. Giáo viên cần duyệt trước khi xuất bản."}
 
 
+def provider_payload(result: ProviderResult | dict) -> tuple[dict, dict]:
+    if isinstance(result, ProviderResult):
+        return result.payload, result.metadata
+    # Keeps test doubles and future adapter implementations backwards compatible.
+    return result, {}
+
+
+def generation_metadata(provider: str, metadata: dict, retries: int = 0) -> dict:
+    safe = {key: metadata.get(key) for key in ("model", "request_id", "input_tokens", "output_tokens") if metadata.get(key) is not None}
+    safe.update({"provider": provider, "retries": retries})
+    return safe
+
+
 def generate_real_content(req: GenerateRequest, credential: AICredential) -> dict:
     adapter = provider_for(credential.provider, api_key=decrypt(credential.encrypted_secret), model=credential.model_default)
     prompt = generation_prompt(req)
     last_error: Exception | None = None
     for attempt in range(2):
         try:
-            course = Course.model_validate(adapter.generate_structured(prompt=prompt, schema=Course.model_json_schema()))
+            payload, metadata = provider_payload(adapter.generate_structured(prompt=prompt, schema=Course.model_json_schema()))
+            course = Course.model_validate(payload)
             course.metadata.title = req.title or course.metadata.title
             course.metadata.direction = req.direction
             course.revision = 1
             if len(course.objectives) < 3 or len(course.slides) < 4 or len(course.question_bank) < 4:
                 raise ValueError("Course does not meet the minimum authoring requirements.")
-            return generated_response(course, credential.provider)
+            generated = generated_response(course, credential.provider)
+            generated["generation"] = generation_metadata(credential.provider, metadata, retries=attempt)
+            return generated
         except ProviderError:
             raise
         except (ValidationError, ValueError, TypeError) as exc:
@@ -366,22 +397,108 @@ def generate_real_content(req: GenerateRequest, credential: AICredential) -> dic
     raise HTTPException(status_code=502, detail="AI trả về dữ liệu chưa hợp lệ sau 2 lần thử. Hãy thử lại.") from last_error
 
 
-@app.post("/api/generate")
-def generate(req: GenerateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
-    if req.provider == "mock":
-        return make_mock_content(req)
-    if not req.credential_id:
+def record_generation(db: Session, *, user_id: str, operation: str, metadata: dict, project_id: str | None = None) -> GenerationRun:
+    run = GenerationRun(user_id=user_id, project_id=project_id, provider=metadata["provider"], model=metadata.get("model"),
+                        request_id=metadata.get("request_id"), input_tokens=metadata.get("input_tokens"),
+                        output_tokens=metadata.get("output_tokens"), operation=operation, metadata_json=metadata)
+    db.add(run)
+    return run
+
+
+def selected_credential(provider: str, credential_id: str | None, user: User, db: Session) -> AICredential:
+    if not credential_id:
         raise HTTPException(status_code=422, detail="Hãy chọn API key đã lưu cho nhà cung cấp này.")
     credential = db.scalar(select(AICredential).where(
-        AICredential.id == req.credential_id, AICredential.user_id == user.id,
-        AICredential.provider == req.provider, AICredential.status == "active",
+        AICredential.id == credential_id, AICredential.user_id == user.id,
+        AICredential.provider == provider, AICredential.status == "active",
     ))
     if credential is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy API key đang hoạt động.")
-    try:
-        return generate_real_content(req, credential)
-    except ProviderError as exc:
-        raise HTTPException(status_code=502, detail="Không thể gọi AI. Hãy kiểm tra API key, model và hạn mức rồi thử lại.") from exc
+    return credential
+
+
+@app.post("/api/generate")
+def generate(req: GenerateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    if req.provider == "mock":
+        generated = make_mock_content(req)
+        generated["generation"] = {"provider": "mock", "model": "mock", "retries": 0}
+    else:
+        try:
+            generated = generate_real_content(req, selected_credential(req.provider, req.credential_id, user, db))
+        except ProviderError as exc:
+            raise HTTPException(status_code=502, detail="Không thể gọi AI. Hãy kiểm tra API key, model và hạn mức rồi thử lại.") from exc
+    run = record_generation(db, user_id=user.id, operation="course", metadata=generated["generation"])
+    db.commit(); db.refresh(run)
+    generated["generation"]["id"] = run.id
+    return generated
+
+
+def mock_regenerated_slide(slide: Slide, source: str) -> Slide:
+    sentences = compact_sentences(source) or ["Giáo viên cần bổ sung nội dung nguồn cho phần này."]
+    content = "\n\n".join(sentences[:2])
+    data = slide.model_dump(mode="json")
+    data["status"] = "ai_draft"
+    data["blocks"] = [{"id": f"{slide.id}-text", "type": "text", "text": content, "settings": {}}]
+    data["speaker_notes"] = "AI đã tạo lại riêng phần này; giáo viên cần duyệt trước khi xuất bản."
+    return Slide.model_validate(data)
+
+
+def regenerate_real_slide(req: RegenerateSlideRequest, course: Course, slide: Slide, credential: AICredential) -> tuple[Slide, dict]:
+    adapter = provider_for(credential.provider, api_key=decrypt(credential.encrypted_secret), model=credential.model_default)
+    prompt = f"""Tạo lại RIÊNG một slide cho bài giảng K-12 tiếng Việt. Trả về đúng một JSON Slide theo schema.
+Định hướng bài: {course.metadata.direction}; tiêu đề bài: {course.metadata.title!r}.
+Slide hiện tại: {slide.model_dump_json()}
+Nguồn để tham chiếu: {req.source}
+Giữ nguyên id slide {slide.id!r}; đặt status là ai_draft; có ít nhất một block text. Không sửa các slide khác và không thêm Markdown."""
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            payload, metadata = provider_payload(adapter.generate_structured(prompt=prompt, schema=Slide.model_json_schema()))
+            regenerated = Slide.model_validate(payload)
+            regenerated.id, regenerated.status = slide.id, "ai_draft"
+            if not any(block.type == "text" and block.text for block in regenerated.blocks):
+                raise ValueError("Regenerated slide does not contain text.")
+            return regenerated, generation_metadata(credential.provider, metadata, retries=attempt)
+        except ProviderError:
+            raise
+        except (ValidationError, ValueError, TypeError) as exc:
+            last_error = exc
+            prompt += "\nLần trước sai schema. Chỉ trả về JSON Slide hợp lệ với block text."
+    raise HTTPException(status_code=502, detail="AI trả về slide chưa hợp lệ sau 2 lần thử. Hãy thử lại.") from last_error
+
+
+@app.post("/api/v1/projects/{project_id}/slides/{slide_id}/regenerate", response_model=ProjectResponse)
+def regenerate_slide(project_id: str, slide_id: str, payload: RegenerateSlideRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if project.revision != payload.expected_revision:
+        raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
+    course = Course.model_validate(project.course_json)
+    index = next((i for i, item in enumerate(course.slides) if item.id == slide_id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Slide not found.")
+    current_slide = course.slides[index]
+    if current_slide.status == "approved":
+        raise HTTPException(status_code=409, detail="Slide đã được duyệt; hệ thống sẽ không tự ghi đè.")
+    if payload.provider == "mock":
+        regenerated, metadata = mock_regenerated_slide(current_slide, payload.source), {"provider": "mock", "model": "mock", "retries": 0}
+    else:
+        try:
+            regenerated, metadata = regenerate_real_slide(payload, course, current_slide, selected_credential(payload.provider, payload.credential_id, user, db))
+        except ProviderError as exc:
+            raise HTTPException(status_code=502, detail="Không thể gọi AI. Hãy kiểm tra API key, model và hạn mức rồi thử lại.") from exc
+    course.slides[index] = regenerated
+    course.revision = payload.expected_revision + 1
+    result = db.execute(update(Project).where(Project.id == project_id, Project.owner_user_id == user.id, Project.revision == payload.expected_revision).values(
+        course_json=course.model_dump(mode="json"), revision=course.revision, schema_version=course.schema_version,
+    ))
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
+    record_generation(db, user_id=user.id, project_id=project_id, operation="slide_regenerate", metadata=metadata)
+    db.commit()
+    return get_project(project_id, user, db)
 
 
 @app.get("/api/v1/projects", response_model=list[ProjectResponse])
@@ -410,6 +527,10 @@ def create_project(payload: ProjectCreateRequest, user: User = Depends(current_t
         schema_version=course.schema_version, revision=course.revision,
     )
     db.add(project)
+    if payload.generation_id:
+        run = db.scalar(select(GenerationRun).where(GenerationRun.id == payload.generation_id, GenerationRun.user_id == user.id, GenerationRun.project_id.is_(None)))
+        if run is not None:
+            run.project_id = project.id
     try:
         db.commit()
     except Exception as exc:

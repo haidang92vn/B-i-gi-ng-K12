@@ -98,6 +98,12 @@ After signing in, open **AI API** in the prototype to save an OpenAI (ChatGPT) o
 
 Mock AI remains the no-cost default. Real provider output is requested as JSON, validated against the canonical `Course` Pydantic model and retried once when invalid. Set a unique `CREDENTIAL_ENCRYPTION_KEY` before production; startup refuses the local fallback when `APP_ENV=production`.
 
+## Milestone 05: analysis, storyboard and targeted regeneration
+
+The lesson, review and advanced directions use distinct generation strategies. Each request creates objectives, a slide storyboard and a question bank with more questions than the four initially selected for the final quiz. The application records the provider/model, request ID and token usage when the provider supplies them; no secret is written to this record.
+
+At the teacher-review step, **Tạo lại phần này** replaces only the chosen slide and increments the project revision. The endpoint refuses to overwrite a slide whose status is `approved`, and also rejects stale revisions so changes from another session are not silently lost.
+
 ## Cấu trúc repository thực tế
 
 ```text

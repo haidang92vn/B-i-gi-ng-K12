@@ -91,6 +91,22 @@ class AICredential(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class GenerationRun(Base):
+    __tablename__ = "generation_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("projects.id"), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(30))
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    operation: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="succeeded")
+    metadata_json: Mapped[dict] = mapped_column(JsonDocument, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 def make_session_factory(url: str | None = None):
     selected_url = url or database_url()
     connect_args = {"check_same_thread": False} if selected_url.startswith("sqlite") else {}

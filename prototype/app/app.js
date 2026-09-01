@@ -105,7 +105,7 @@ function syncCanonicalCourse(){
 
 async function createProjectFromGenerated(){
   const course=syncCanonicalCourse();
-  const payload={title:course.metadata.title,direction:state.direction,course};
+  const payload={title:course.metadata.title,direction:state.direction,course,generation_id:state.generated.generation?.id||null};
   const response=await fetch("/api/v1/projects",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
   if(!response.ok) throw new Error("Không thể lưu bản nháp bài giảng.");
   state.project=await response.json();
@@ -132,11 +132,12 @@ async function persistGenerated(){
 
 function renderAI(){
   const g=state.generated;
+  const usage=g.generation&&((g.generation.input_tokens!=null||g.generation.output_tokens!=null)?` • ${g.generation.input_tokens||0} vào / ${g.generation.output_tokens||0} ra token`:'');
   document.getElementById("aiOutput").className="";
   document.getElementById("aiOutput").innerHTML=`
   <div class="ai-summary">
     <div class="summary-card"><span class="eyebrow">MỤC TIÊU</span><h3>${escapeHtml(g.direction_name)}</h3><ul>${g.objectives.map(x=>`<li>${escapeHtml(x)}</li>`).join("")}</ul></div>
-    <div class="summary-card"><span class="eyebrow">CẤU TRÚC ĐỀ XUẤT</span>${g.sections.map((s,i)=>`<h3>${i+1}. ${escapeHtml(s.title)}</h3><p>${escapeHtml(s.content).slice(0,180)}...</p>`).join("")}<div class="hint">${escapeHtml(g.notice)}</div></div>
+    <div class="summary-card"><span class="eyebrow">CẤU TRÚC ĐỀ XUẤT</span>${g.sections.map((s,i)=>`<h3>${i+1}. ${escapeHtml(s.title)}</h3><p>${escapeHtml(s.content).slice(0,180)}...</p>`).join("")}<div class="hint">${escapeHtml(g.notice)}${escapeHtml(usage||'')}</div></div>
   </div>`;
 }
 
@@ -145,11 +146,22 @@ function renderReview(){
   document.getElementById("reviewArea").className="";
   document.getElementById("reviewArea").innerHTML=`
     <div class="review-objectives"><h3>Mục tiêu bài học</h3>${g.objectives.map((o,i)=>`<input data-obj="${i}" value="${escapeHtml(o)}">`).join("")}</div>
-    ${g.sections.map((s,i)=>`<div class="review-section"><div class="row"><input data-sec-title="${i}" value="${escapeHtml(s.title)}"><textarea data-sec-content="${i}">${escapeHtml(s.content)}</textarea></div></div>`).join("")}
+    ${g.sections.map((s,i)=>`<div class="review-section"><div class="row"><input data-sec-title="${i}" value="${escapeHtml(s.title)}"><textarea data-sec-content="${i}">${escapeHtml(s.content)}</textarea></div><button class="ghost" onclick="regenerateSection(${i})">Tạo lại phần này</button></div>`).join("")}
   `;
   document.querySelectorAll("[data-obj]").forEach(el=>el.addEventListener("input",()=>{g.objectives[Number(el.dataset.obj)]=el.value;scheduleSave();}));
   document.querySelectorAll("[data-sec-title]").forEach(el=>el.addEventListener("input",()=>{g.sections[Number(el.dataset.secTitle)].title=el.value;scheduleSave();}));
   document.querySelectorAll("[data-sec-content]").forEach(el=>el.addEventListener("input",()=>{g.sections[Number(el.dataset.secContent)].content=el.value;scheduleSave();}));
+}
+
+async function regenerateSection(index){
+  if(!state.project){alert('Hãy lưu bản nháp bài giảng trước.');return;}
+  const section=state.generated.sections[index];
+  const response=await fetch(`/api/v1/projects/${state.project.id}/slides/${section.id}/regenerate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:sourceText.value||'Nội dung bài học do giáo viên cung cấp.',provider:generationProvider.value,credential_id:generationCredential.value||null,expected_revision:state.project.revision})});
+  if(!response.ok){alert((await apiMessage(response))||'Không thể tạo lại phần này.');return;}
+  state.project=await response.json();
+  const slide=state.project.course.slides.find(x=>x.id===section.id);
+  section.title=slide.title;section.content=slide.blocks.find(x=>x.type==='text')?.text||'';section.note=slide.speaker_notes||'';
+  state.generated.course=state.project.course;renderAI();renderReview();
 }
 
 const quizTypeLabels={single:"Một đáp án",multiple:"Nhiều đáp án",truefalse:"Đúng / Sai",fill:"Điền từ",matching:"Ghép đôi",ordering:"Sắp xếp",dragdrop:"Kéo thả",image:"Chọn hình ảnh"};

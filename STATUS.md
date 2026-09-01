@@ -21,6 +21,8 @@ architecture. It is **not yet the production application**.
 - Source uploads for TXT, PDF, DOCX and PPTX; extracted text and file metadata are persisted while object bytes use R2-compatible storage.
 - Per-teacher encrypted OpenAI/Gemini credentials; the browser only receives metadata and the last four key characters.
 - Server-side provider adapters for Mock AI, OpenAI Responses API and Google Gemini structured JSON output, with schema validation and one retry.
+- Lesson, review and advanced AI storyboarding with a larger question bank than the initially selected quiz set; per-slide regeneration preserves other slides and rejects overwriting approved slides.
+- Non-sensitive generation metadata (provider, model, request ID and token counts when supplied) is stored in `generation_runs` and linked to the created project.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 

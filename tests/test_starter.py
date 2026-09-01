@@ -58,6 +58,32 @@ class PrototypeTests(unittest.TestCase):
         for token in ["API_1484_11", "Initialize", "SetValue", "Commit", "Terminate"]:
             self.assertIn(token, runtime)
 
+    def test_regenerates_only_draft_slide_and_records_metadata(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"teacher-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        generated = client.post("/api/generate", json={"title": "Bài kiểm thử", "source": "Nội dung một. Nội dung hai.", "provider": "mock"})
+        self.assertEqual(generated.status_code, 200, generated.text)
+        generated_data = generated.json()
+        project = client.post("/api/v1/projects", json={"title": "Bài kiểm thử", "direction": "lesson", "course": generated_data["course"], "generation_id": generated_data["generation"]["id"]})
+        self.assertEqual(project.status_code, 201, project.text)
+        before = project.json()
+        first_slide_id = before["course"]["slides"][0]["id"]
+        untouched_slide = before["course"]["slides"][1]
+        regenerated = client.post(f"/api/v1/projects/{before['id']}/slides/{first_slide_id}/regenerate", json={"source": "Nội dung thay thế. Có thêm ví dụ mới.", "provider": "mock", "expected_revision": 1})
+        self.assertEqual(regenerated.status_code, 200, regenerated.text)
+        after = regenerated.json()
+        self.assertEqual(after["revision"], 2)
+        self.assertEqual(after["course"]["slides"][1], untouched_slide)
+        self.assertIn("Nội dung thay thế", after["course"]["slides"][0]["blocks"][0]["text"])
+
+        approved = after["course"]
+        approved["revision"] = 3
+        approved["slides"][0]["status"] = "approved"
+        saved = client.patch(f"/api/v1/projects/{before['id']}", json={"expected_revision": 2, "course": approved})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        rejected = client.post(f"/api/v1/projects/{before['id']}/slides/{first_slide_id}/regenerate", json={"source": "Không được ghi đè.", "provider": "mock", "expected_revision": 3})
+        self.assertEqual(rejected.status_code, 409, rejected.text)
+
     def test_project_course_persists_and_revision_conflicts_are_rejected(self):
         client = TestClient(self.module.app)
         title = f"Kiểm thử persistence {uuid4()}"

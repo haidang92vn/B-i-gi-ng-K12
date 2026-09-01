@@ -84,6 +84,10 @@ alembic upgrade head
 Các API hiện có: `GET/POST /api/v1/projects`, `GET/PATCH /api/v1/projects/{project_id}`.
 `PATCH` bắt buộc gửi `expected_revision`; server từ chối cập nhật cũ thay vì ghi đè âm thầm.
 
+## Milestone 02: teacher accounts and project library
+
+Prototype now provides registration, login, logout and revocable opaque browser sessions. Passwords use Argon2id; the session token is only issued in an HttpOnly cookie. Project endpoints always resolve the owner from that session, so one teacher cannot read or change another teacher's project. The local demo includes “Bài giảng của tôi” for opening, copying, archiving and deleting projects.
+
 ## Cấu trúc repository thực tế
 
 ```text

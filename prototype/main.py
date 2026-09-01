@@ -1,5 +1,5 @@
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Response, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -10,12 +10,12 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from prototype.course_models import Course, new_course
-from prototype.persistence import Project, create_schema, make_session_factory
+from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
+from prototype.persistence import AuthSession, Project, User, create_schema, make_session_factory
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "app"
 
-DEMO_OWNER_ID = "demo-teacher"
 BASE_DIR.joinpath("storage").mkdir(exist_ok=True)
 engine, SessionLocal = make_session_factory()
 create_schema(engine)
@@ -31,15 +31,44 @@ def get_db():
         db.close()
 
 
+def current_teacher(session_token: str | None = Cookie(default=None, alias=COOKIE_NAME), db: Session = Depends(get_db)) -> User:
+    authenticated = current_session(db, session_token)
+    if authenticated is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+    return authenticated[0]
+
+
 class ProjectCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     direction: Literal["lesson", "review", "advanced"] = "lesson"
     course: Course | None = None
 
 
+class RegisterRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=12, max_length=256)
+    full_name: str | None = Field(default=None, max_length=200)
+    school_name: str | None = Field(default=None, max_length=200)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class TeacherResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str | None
+    school_name: str | None
+
+
 class ProjectUpdateRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     course: Course
+
+class RenameProjectRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
 
 
 class ProjectResponse(BaseModel):
@@ -55,6 +84,53 @@ def serialize_project(project: Project) -> ProjectResponse:
         id=project.id, title=project.title, status=project.status,
         revision=project.revision, course=Course.model_validate(project.course_json),
     )
+
+
+def serialize_teacher(user: User) -> TeacherResponse:
+    return TeacherResponse(id=user.id, email=user.email, full_name=user.full_name, school_name=user.school_name)
+
+
+@app.post("/api/v1/auth/register", response_model=TeacherResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterRequest, response: Response, db: Session = Depends(get_db)):
+    email = normalise_email(payload.email)
+    if "@" not in email:
+        raise HTTPException(status_code=422, detail="A valid email is required.")
+    if db.scalar(select(User.id).where(User.email == email)) is not None:
+        raise HTTPException(status_code=409, detail="Email is already registered.")
+    user = User(email=email, password_hash=password_hasher.hash(payload.password), full_name=payload.full_name, school_name=payload.school_name)
+    db.add(user)
+    db.flush()
+    token = new_session(db, user)
+    db.commit()
+    db.refresh(user)
+    set_session_cookie(response, token)
+    return serialize_teacher(user)
+
+
+@app.post("/api/v1/auth/login", response_model=TeacherResponse)
+def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.email == normalise_email(payload.email)))
+    if user is None or not password_hasher.verify(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    user.last_login_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    token = new_session(db, user)
+    db.commit()
+    set_session_cookie(response, token)
+    return serialize_teacher(user)
+
+
+@app.post("/api/v1/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response, session_token: str | None = Cookie(default=None, alias=COOKIE_NAME), db: Session = Depends(get_db)):
+    authenticated = current_session(db, session_token)
+    if authenticated:
+        authenticated[1].revoked_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        db.commit()
+    response.delete_cookie(COOKIE_NAME, path="/")
+
+
+@app.get("/api/v1/me", response_model=TeacherResponse)
+def me(user: User = Depends(current_teacher)):
+    return serialize_teacher(user)
 
 class GenerateRequest(BaseModel):
     title: str
@@ -188,27 +264,27 @@ def generate(req: GenerateRequest):
 
 
 @app.get("/api/v1/projects", response_model=list[ProjectResponse])
-def list_projects(db: Session = Depends(get_db)):
+def list_projects(user: User = Depends(current_teacher), db: Session = Depends(get_db)):
     """List only the current demo teacher's projects.
 
     Milestone 02 replaces this fixed demo identity with authenticated user
     resolution; callers never supply an owner id themselves.
     """
     projects = db.scalars(
-        select(Project).where(Project.owner_user_id == DEMO_OWNER_ID).order_by(Project.updated_at.desc())
+        select(Project).where(Project.owner_user_id == user.id).order_by(Project.updated_at.desc())
     ).all()
     return [serialize_project(project) for project in projects]
 
 
 @app.post("/api/v1/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
-def create_project(payload: ProjectCreateRequest, db: Session = Depends(get_db)):
+def create_project(payload: ProjectCreateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
     course = payload.course or new_course(payload.title, payload.direction)
     if course.revision != 1:
         raise HTTPException(status_code=422, detail="A newly created project must start at revision 1.")
     if course.metadata.title != payload.title:
         course.metadata.title = payload.title
     project = Project(
-        id=course.id, owner_user_id=DEMO_OWNER_ID, title=course.metadata.title,
+        id=course.id, owner_user_id=user.id, title=course.metadata.title,
         status="active", course_json=course.model_dump(mode="json"),
         schema_version=course.schema_version, revision=course.revision,
     )
@@ -223,15 +299,15 @@ def create_project(payload: ProjectCreateRequest, db: Session = Depends(get_db))
 
 
 @app.get("/api/v1/projects/{project_id}", response_model=ProjectResponse)
-def get_project(project_id: str, db: Session = Depends(get_db)):
-    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == DEMO_OWNER_ID))
+def get_project(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found.")
     return serialize_project(project)
 
 
 @app.patch("/api/v1/projects/{project_id}", response_model=ProjectResponse)
-def update_project(project_id: str, payload: ProjectUpdateRequest, db: Session = Depends(get_db)):
+def update_project(project_id: str, payload: ProjectUpdateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
     if payload.course.id != project_id:
         raise HTTPException(status_code=422, detail="course.id must match the project id.")
     if payload.course.revision != payload.expected_revision + 1:
@@ -241,7 +317,7 @@ def update_project(project_id: str, payload: ProjectUpdateRequest, db: Session =
         update(Project)
         .where(
             Project.id == project_id,
-            Project.owner_user_id == DEMO_OWNER_ID,
+            Project.owner_user_id == user.id,
             Project.revision == payload.expected_revision,
         )
         .values(
@@ -253,12 +329,35 @@ def update_project(project_id: str, payload: ProjectUpdateRequest, db: Session =
     )
     if result.rowcount != 1:
         db.rollback()
-        existing = db.scalar(select(Project.id).where(Project.id == project_id, Project.owner_user_id == DEMO_OWNER_ID))
+        existing = db.scalar(select(Project.id).where(Project.id == project_id, Project.owner_user_id == user.id))
         if existing is None:
             raise HTTPException(status_code=404, detail="Project not found.")
         raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
     db.commit()
-    return get_project(project_id, db)
+    return get_project(project_id, user, db)
+
+@app.post("/api/v1/projects/{project_id}/duplicate", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+def duplicate_project(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    source = get_project(project_id, user, db)
+    course = source.course.model_copy(deep=True)
+    course.id = str(__import__("uuid").uuid4()); course.revision = 1
+    course.metadata.title = f"{course.metadata.title} (bản sao)"
+    project = Project(id=course.id, owner_user_id=user.id, title=course.metadata.title, status="active", course_json=course.model_dump(mode="json"), schema_version=course.schema_version, revision=1)
+    db.add(project); db.commit(); db.refresh(project)
+    return serialize_project(project)
+
+@app.post("/api/v1/projects/{project_id}/archive", response_model=ProjectResponse)
+def archive_project(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
+    if project is None: raise HTTPException(status_code=404, detail="Project not found.")
+    project.status = "archived"; db.commit(); db.refresh(project)
+    return serialize_project(project)
+
+@app.delete("/api/v1/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project = db.scalar(select(Project).where(Project.id == project_id, Project.owner_user_id == user.id))
+    if project is None: raise HTTPException(status_code=404, detail="Project not found.")
+    db.delete(project); db.commit()
 
 def scorm_manifest(title: str):
     safe_title = html.escape(title)

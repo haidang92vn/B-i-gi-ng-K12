@@ -61,6 +61,11 @@ class PrototypeTests(unittest.TestCase):
     def test_project_course_persists_and_revision_conflicts_are_rejected(self):
         client = TestClient(self.module.app)
         title = f"Kiểm thử persistence {uuid4()}"
+        registered = client.post("/api/v1/auth/register", json={
+            "email": f"teacher-{uuid4()}@example.test", "password": "a-secure-test-password",
+            "full_name": "Giáo viên kiểm thử",
+        })
+        self.assertEqual(registered.status_code, 201, registered.text)
         created = client.post("/api/v1/projects", json={"title": title, "direction": "lesson"})
         self.assertEqual(created.status_code, 201, created.text)
         project = created.json()
@@ -83,6 +88,13 @@ class PrototypeTests(unittest.TestCase):
         )
         self.assertEqual(stale.status_code, 409, stale.text)
         self.assertEqual(stale.json()["detail"]["code"], "COURSE_REVISION_CONFLICT")
+
+        other_client = TestClient(self.module.app)
+        other_client.post("/api/v1/auth/register", json={
+            "email": f"teacher-{uuid4()}@example.test", "password": "another-secure-password",
+        })
+        forbidden = other_client.get(f"/api/v1/projects/{project['id']}")
+        self.assertEqual(forbidden.status_code, 404, forbidden.text)
 
 
 if __name__ == "__main__":

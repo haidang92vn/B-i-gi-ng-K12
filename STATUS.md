@@ -16,6 +16,8 @@ architecture. It is **not yet the production application**.
 - `course.json` JSON Schema and example.
 - Versioned Pydantic `course.json` model, project persistence and Alembic migration.
 - Optimistic revision handling for project reads/updates in the prototype API.
+- Teacher registration/login/logout with Argon2id password hashing and revocable HttpOnly sessions.
+- Per-teacher project library with ownership isolation, duplicate, archive and delete actions.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 
@@ -23,7 +25,6 @@ architecture. It is **not yet the production application**.
 
 - Production Next.js frontend.
 - Production PostgreSQL project library (the local prototype uses SQLite; deployment must run the Alembic migration against PostgreSQL).
-- Authentication/authorization.
 - Cloudflare R2/S3 file storage.
 - Encrypted per-teacher AI credentials.
 - Real OpenAI/Gemini/Claude provider adapters.

@@ -127,6 +127,16 @@ def logout(response: Response, session_token: str | None = Cookie(default=None, 
         db.commit()
     response.delete_cookie(COOKIE_NAME, path="/")
 
+@app.post("/api/v1/auth/refresh", response_model=TeacherResponse)
+def refresh_session(response: Response, session_token: str | None = Cookie(default=None, alias=COOKIE_NAME), db: Session = Depends(get_db)):
+    authenticated = current_session(db, session_token)
+    if authenticated is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    user, old_session = authenticated
+    old_session.revoked_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    token = new_session(db, user); db.commit(); set_session_cookie(response, token)
+    return serialize_teacher(user)
+
 
 @app.get("/api/v1/me", response_model=TeacherResponse)
 def me(user: User = Depends(current_teacher)):

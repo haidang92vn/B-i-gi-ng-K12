@@ -139,5 +139,5 @@ Acceptance:
 - [x] slide text-density checks.
 - [ ] media/TTS.
 - [x] school/team accounts.
-- [ ] shared question library.
+- [x] shared question library.
 - [ ] analytics.

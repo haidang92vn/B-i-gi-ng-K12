@@ -322,6 +322,53 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(admin.delete(f"/api/v1/schools/{school['id']}/members/{collaborator_user['id']}").status_code, 204)
         self.assertEqual(collaborator.get(f"/api/v1/projects/{project['id']}").status_code, 404)
 
+    def test_shared_question_requires_review_before_school_library_use(self):
+        admin = TestClient(self.module.app)
+        teacher = TestClient(self.module.app)
+        outsider = TestClient(self.module.app)
+        admin_email = f"admin-library-{uuid4()}@example.test"
+        teacher_email = f"teacher-library-{uuid4()}@example.test"
+        for client, email in ((admin, admin_email), (teacher, teacher_email), (outsider, f"outside-library-{uuid4()}@example.test")):
+            response = client.post("/api/v1/auth/register", json={"email": email, "password": "a-secure-test-password"})
+            self.assertEqual(response.status_code, 201, response.text)
+
+        school = admin.post("/api/v1/schools", json={"name": f"Trường thư viện {uuid4()}"}).json()
+        member = admin.put(f"/api/v1/schools/{school['id']}/members", json={"email": teacher_email, "role": "teacher"})
+        self.assertEqual(member.status_code, 200, member.text)
+        generated = teacher.post("/api/generate", json={"title": "Bài có câu hỏi", "source": "Nguồn học liệu.", "provider": "mock"}).json()
+        project = teacher.post("/api/v1/projects", json={"title": "Bài có câu hỏi", "direction": "lesson", "course": generated["course"]}).json()
+        question_id = project["course"]["question_bank"][0]["id"]
+        draft = teacher.post(
+            f"/api/v1/projects/{project['id']}/questions/{question_id}/shared-draft",
+            json={"school_id": school["id"], "subject": "Toán", "grade": "Lớp 5", "topic": "Phân số", "learning_objectives": ["Nhận biết phân số bằng nhau"]},
+        )
+        self.assertEqual(draft.status_code, 201, draft.text)
+        self.assertEqual(draft.json()["status"], "draft")
+        self.assertEqual(outsider.get("/api/v1/shared-questions", params={"school_id": school["id"]}).status_code, 404)
+        self.assertEqual(teacher.get("/api/v1/shared-questions", params={"school_id": school["id"]}).json()[0]["status"], "draft")
+        submitted = teacher.post(f"/api/v1/shared-questions/{draft.json()['id']}/submit")
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        self.assertEqual(teacher.post(f"/api/v1/shared-questions/{draft.json()['id']}/review", json={"decision": "published"}).status_code, 403)
+        published = admin.post(f"/api/v1/shared-questions/{draft.json()['id']}/review", json={"decision": "published"})
+        self.assertEqual(published.status_code, 200, published.text)
+        self.assertEqual(published.json()["reviewed_by_user_id"], admin.get("/api/v1/me").json()["id"])
+
+        imported = teacher.post(
+            f"/api/v1/projects/{project['id']}/shared-questions/{draft.json()['id']}/add",
+            json={"expected_revision": 1, "selected": True},
+        )
+        self.assertEqual(imported.status_code, 200, imported.text)
+        self.assertEqual(imported.json()["revision"], 2)
+        self.assertEqual(len(imported.json()["course"]["question_bank"]), len(project["course"]["question_bank"]) + 1)
+        admin_draft = admin.post("/api/v1/shared-questions", json={
+            "school_id": school["id"], "subject": "Toán", "grade": "Lớp 5", "topic": "Số học",
+            "learning_objectives": ["Củng cố phép tính"],
+            "question": {"type": "single", "question": "2 + 2 bằng bao nhiêu?", "difficulty": "recognize", "correct_answer": "4", "options": ["3", "4"]},
+        })
+        self.assertEqual(admin_draft.status_code, 201, admin_draft.text)
+        self.assertEqual(admin.post(f"/api/v1/shared-questions/{admin_draft.json()['id']}/submit").status_code, 200)
+        self.assertEqual(admin.post(f"/api/v1/shared-questions/{admin_draft.json()['id']}/review", json={"decision": "published"}).status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,6 +41,20 @@ School admins manage membership. Project owners can share only with a registered
 shared school team, with `viewer` or `editor` access. Readers receive no ownership-changing
 endpoints; unauthorized access is returned as `404`.
 
+## Shared question library
+```text
+GET  /api/v1/shared-questions?school_id={school_id}
+POST /api/v1/shared-questions
+POST /api/v1/shared-questions/{shared_question_id}/submit
+POST /api/v1/shared-questions/{shared_question_id}/review
+POST /api/v1/projects/{project_id}/questions/{question_id}/shared-draft
+POST /api/v1/projects/{project_id}/shared-questions/{shared_question_id}/add
+```
+
+Questions move from `draft` to `submitted`, then a school admin marks them `published` or
+`rejected`. Only published questions can be copied into a project, with an optimistic revision
+precondition.
+
 ## Source files
 ```text
 POST   /api/v1/projects/{project_id}/sources

@@ -42,6 +42,7 @@ REQUIRED_FILES = [
     "docs/DEPLOYMENT.md",
     "docs/RESTORE_DRILL.md",
     "docs/QUALITY_CHECKS.md",
+    "docs/SHARED_QUESTION_LIBRARY.md",
     "docs/TEAMS.md",
     "docs/DECISIONS.md",
     "docs/UX_FLOW.md",

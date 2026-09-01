@@ -109,6 +109,21 @@ Never return `encrypted_secret` through normal API serializers.
 ## question_bank_items
 Do not require normalization in Milestone 01. Add later if cross-project reuse is implemented.
 
+## shared_questions
+- id
+- school_id
+- subject / grade / topic
+- question_json (validated question content, excluding per-course selection)
+- learning_objectives JSON
+- status: draft / submitted / published / rejected
+- submitted_by_user_id
+- reviewed_by_user_id nullable
+- reviewed_at nullable
+- created_at / updated_at
+
+Shared questions are copies of reviewed question content. Adding one to a project generates a
+fresh canonical question id; it does not create a mutable cross-project reference.
+
 ## export_jobs
 - id
 - project_id

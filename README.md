@@ -141,6 +141,14 @@ The owner can share a lesson only with a teacher in a common school, choosing **
 **Có thể chỉnh sửa**. Viewers can preview, quality-check and export a SCORM copy but cannot alter
 the lesson or upload source files. See [docs/TEAMS.md](docs/TEAMS.md).
 
+## Milestone 12.3: shared question library
+
+In **Câu hỏi chung**, a teacher can turn an edited AI-generated question from the currently open
+lesson into a school-library draft, with subject, grade, topic and learning objectives. The
+teacher submits it; a school administrator must publish it before members can add a copied,
+editable version to their own lesson. Reviewer attribution is retained. See
+[docs/SHARED_QUESTION_LIBRARY.md](docs/SHARED_QUESTION_LIBRARY.md).
+
 ## Cấu trúc repository thực tế
 
 ```text

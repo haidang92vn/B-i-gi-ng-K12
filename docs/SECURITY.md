@@ -21,6 +21,10 @@ this relationship on every grant. `viewer` access never permits course mutation 
 and a missing grant is intentionally represented as `404` to avoid disclosing another teacher's
 project.
 
+Shared-question drafts are visible only to their author and school admins. Publishing/rejecting
+requires a school-admin membership checked server-side. A published question is copied into a
+course with a new id, so editing one course cannot silently modify content in another course.
+
 ## Files
 - Restrict allowed file types and sizes.
 - Generate server-side object keys; do not trust raw filenames as paths.

@@ -2,18 +2,19 @@
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
-from pydantic import BaseModel, Field, ValidationError
-from typing import List, Literal, Optional
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from typing import Any, List, Literal, Optional
 from pathlib import Path
+from datetime import datetime
 import io, zipfile, html, json, os, re
 from xml.etree import ElementTree
 from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 
-from prototype.course_models import Course, Slide, new_course
+from prototype.course_models import Course, Question, Slide, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
 from prototype.credentials import decrypt, encrypt
-from prototype.persistence import AICredential, AuthSession, ExportRecord, GenerationRun, Project, ProjectShare, School, SchoolMembership, SourceMaterial, User, create_schema, make_session_factory
+from prototype.persistence import AICredential, AuthSession, ExportRecord, GenerationRun, Project, ProjectShare, School, SchoolMembership, SharedQuestion, SourceMaterial, User, create_schema, make_session_factory
 from prototype.providers import ProviderError, ProviderResult, provider_for
 from prototype.sources import extract_text, validate_upload
 from prototype.storage import Storage
@@ -132,6 +133,62 @@ class ProjectShareResponse(BaseModel):
     full_name: str | None
     access_level: Literal["viewer", "editor"]
 
+
+class SharedQuestionContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["single", "multiple", "truefalse", "fill", "matching", "ordering", "dragdrop", "image"]
+    question: str = Field(min_length=5, max_length=4000)
+    difficulty: Literal["recognize", "understand", "apply", "advanced"]
+    correct_answer: Any
+    options: list[str] = Field(default_factory=list, max_length=20)
+    recommended_score: float = Field(default=1, ge=0, le=100)
+    explanation: str | None = Field(default=None, max_length=4000)
+    feedback_correct: str | None = Field(default=None, max_length=2000)
+    feedback_incorrect: str | None = Field(default=None, max_length=2000)
+
+
+class SharedQuestionCreateRequest(BaseModel):
+    school_id: str = Field(min_length=1, max_length=36)
+    subject: str = Field(min_length=2, max_length=100)
+    grade: str = Field(min_length=1, max_length=50)
+    topic: str = Field(min_length=2, max_length=200)
+    learning_objectives: list[str] = Field(min_length=1, max_length=12)
+    question: SharedQuestionContent
+
+
+class SharedQuestionFromProjectRequest(BaseModel):
+    school_id: str = Field(min_length=1, max_length=36)
+    subject: str = Field(min_length=2, max_length=100)
+    grade: str = Field(min_length=1, max_length=50)
+    topic: str = Field(min_length=2, max_length=200)
+    learning_objectives: list[str] = Field(min_length=1, max_length=12)
+
+
+class SharedQuestionReviewRequest(BaseModel):
+    decision: Literal["published", "rejected"]
+
+
+class SharedQuestionImportRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    selected: bool = True
+
+
+class SharedQuestionResponse(BaseModel):
+    id: str
+    school_id: str
+    subject: str
+    grade: str
+    topic: str
+    learning_objectives: list[str]
+    question: SharedQuestionContent
+    status: Literal["draft", "submitted", "published", "rejected"]
+    submitted_by_user_id: str
+    submitted_by_name: str | None
+    reviewed_by_user_id: str | None
+    reviewed_by_name: str | None
+    reviewed_at: datetime | None
+
 class SourceResponse(BaseModel):
     id: str; original_name: str; mime_type: str; byte_size: int; extracted_text: str | None
 class CredentialCreateRequest(BaseModel):
@@ -190,6 +247,70 @@ def shared_school_ids(db: Session, first_user_id: str, second_user_id: str) -> s
     first = set(db.scalars(select(SchoolMembership.school_id).where(SchoolMembership.user_id == first_user_id)).all())
     second = set(db.scalars(select(SchoolMembership.school_id).where(SchoolMembership.user_id == second_user_id)).all())
     return first & second
+
+
+def require_school_membership(db: Session, school_id: str, user: User) -> SchoolMembership:
+    membership = membership_for(db, school_id, user.id)
+    if membership is None:
+        raise HTTPException(status_code=404, detail="School not found.")
+    return membership
+
+
+def cleaned_learning_objectives(values: list[str]) -> list[str]:
+    cleaned = [" ".join(value.split()) for value in values if value and value.strip()]
+    if not cleaned:
+        raise HTTPException(status_code=422, detail="At least one learning objective is required.")
+    if any(len(value) > 500 for value in cleaned):
+        raise HTTPException(status_code=422, detail="Learning objectives must be at most 500 characters.")
+    return list(dict.fromkeys(cleaned))
+
+
+def cleaned_label(value: str, *, field_name: str) -> str:
+    cleaned = " ".join(value.split())
+    if not cleaned:
+        raise HTTPException(status_code=422, detail=f"{field_name} is required.")
+    return cleaned
+
+
+def serialise_shared_question(item: SharedQuestion, db: Session) -> SharedQuestionResponse:
+    author = db.get(User, item.submitted_by_user_id)
+    reviewer = db.get(User, item.reviewed_by_user_id) if item.reviewed_by_user_id else None
+    return SharedQuestionResponse(
+        id=item.id, school_id=item.school_id, subject=item.subject, grade=item.grade, topic=item.topic,
+        learning_objectives=list(item.learning_objectives or []),
+        question=SharedQuestionContent.model_validate(item.question_json), status=item.status,
+        submitted_by_user_id=item.submitted_by_user_id, submitted_by_name=author.full_name if author else None,
+        reviewed_by_user_id=item.reviewed_by_user_id, reviewed_by_name=reviewer.full_name if reviewer else None,
+        reviewed_at=item.reviewed_at,
+    )
+
+
+def create_shared_question(
+    db: Session,
+    *,
+    user: User,
+    school_id: str,
+    subject: str,
+    grade: str,
+    topic: str,
+    learning_objectives: list[str],
+    question: SharedQuestionContent,
+) -> SharedQuestion:
+    require_school_membership(db, school_id, user)
+    item = SharedQuestion(
+        school_id=school_id,
+        subject=cleaned_label(subject, field_name="Subject"),
+        grade=cleaned_label(grade, field_name="Grade"),
+        topic=cleaned_label(topic, field_name="Topic"),
+        learning_objectives=cleaned_learning_objectives(learning_objectives),
+        question_json=question.model_dump(mode="json"),
+        status="draft",
+        submitted_by_user_id=user.id,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
 
 
 def project_with_access(db: Session, project_id: str, user: User, *, require_edit: bool = False) -> tuple[Project, Literal["owner", "viewer", "editor"]]:
@@ -328,6 +449,124 @@ def remove_school_member(school_id: str, member_user_id: str, user: User = Depen
             raise HTTPException(status_code=409, detail="A school must retain at least one administrator.")
     db.delete(membership)
     db.commit()
+
+
+@app.get("/api/v1/shared-questions", response_model=list[SharedQuestionResponse])
+def list_shared_questions(school_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    membership = require_school_membership(db, school_id, user)
+    candidates = db.scalars(
+        select(SharedQuestion)
+        .where(SharedQuestion.school_id == school_id)
+        .order_by(SharedQuestion.updated_at.desc())
+    ).all()
+    visible = [
+        item for item in candidates
+        if item.status == "published" or item.submitted_by_user_id == user.id or membership.role == "school_admin"
+    ]
+    return [serialise_shared_question(item, db) for item in visible]
+
+
+@app.post("/api/v1/shared-questions", response_model=SharedQuestionResponse, status_code=status.HTTP_201_CREATED)
+def create_shared_question_endpoint(payload: SharedQuestionCreateRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    item = create_shared_question(
+        db, user=user, school_id=payload.school_id, subject=payload.subject, grade=payload.grade,
+        topic=payload.topic, learning_objectives=payload.learning_objectives, question=payload.question,
+    )
+    return serialise_shared_question(item, db)
+
+
+@app.post("/api/v1/shared-questions/{shared_question_id}/submit", response_model=SharedQuestionResponse)
+def submit_shared_question(shared_question_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    item = db.get(SharedQuestion, shared_question_id)
+    if item is None or item.submitted_by_user_id != user.id:
+        raise HTTPException(status_code=404, detail="Shared question not found.")
+    require_school_membership(db, item.school_id, user)
+    if item.status not in {"draft", "rejected"}:
+        raise HTTPException(status_code=409, detail="Only a draft or rejected question can be submitted.")
+    item.status, item.reviewed_by_user_id, item.reviewed_at = "submitted", None, None
+    db.commit()
+    db.refresh(item)
+    return serialise_shared_question(item, db)
+
+
+@app.post("/api/v1/shared-questions/{shared_question_id}/review", response_model=SharedQuestionResponse)
+def review_shared_question(shared_question_id: str, payload: SharedQuestionReviewRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    item = db.get(SharedQuestion, shared_question_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Shared question not found.")
+    require_school_admin(db, item.school_id, user)
+    if item.status != "submitted":
+        raise HTTPException(status_code=409, detail="Only a submitted question can be reviewed.")
+    if item.submitted_by_user_id == user.id:
+        raise HTTPException(status_code=403, detail="A different school administrator must review this question.")
+    item.status = payload.decision
+    item.reviewed_by_user_id = user.id
+    item.reviewed_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    db.commit()
+    db.refresh(item)
+    return serialise_shared_question(item, db)
+
+
+@app.post("/api/v1/projects/{project_id}/questions/{question_id}/shared-draft", response_model=SharedQuestionResponse, status_code=status.HTTP_201_CREATED)
+def create_shared_question_from_project(
+    project_id: str,
+    question_id: str,
+    payload: SharedQuestionFromProjectRequest,
+    user: User = Depends(current_teacher),
+    db: Session = Depends(get_db),
+):
+    project, _ = project_with_access(db, project_id, user, require_edit=True)
+    course = Course.model_validate(project.course_json)
+    source_question = next((item for item in course.question_bank if item.id == question_id), None)
+    if source_question is None:
+        raise HTTPException(status_code=404, detail="Question not found in this project.")
+    question = SharedQuestionContent(
+        type=source_question.type, question=source_question.question, difficulty=source_question.difficulty,
+        correct_answer=source_question.correct_answer, options=source_question.options,
+        recommended_score=source_question.score, explanation=source_question.explanation,
+        feedback_correct=source_question.feedback_correct, feedback_incorrect=source_question.feedback_incorrect,
+    )
+    item = create_shared_question(
+        db, user=user, school_id=payload.school_id, subject=payload.subject, grade=payload.grade,
+        topic=payload.topic, learning_objectives=payload.learning_objectives, question=question,
+    )
+    return serialise_shared_question(item, db)
+
+
+@app.post("/api/v1/projects/{project_id}/shared-questions/{shared_question_id}/add", response_model=ProjectResponse)
+def add_shared_question_to_project(
+    project_id: str,
+    shared_question_id: str,
+    payload: SharedQuestionImportRequest,
+    user: User = Depends(current_teacher),
+    db: Session = Depends(get_db),
+):
+    project, access = project_with_access(db, project_id, user, require_edit=True)
+    item = db.get(SharedQuestion, shared_question_id)
+    if item is None or item.status != "published":
+        raise HTTPException(status_code=404, detail="Published shared question not found.")
+    require_school_membership(db, item.school_id, user)
+    if project.revision != payload.expected_revision:
+        raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
+    shared = SharedQuestionContent.model_validate(item.question_json)
+    course = Course.model_validate(project.course_json)
+    course.question_bank.append(Question(
+        id=str(__import__("uuid").uuid4()), type=shared.type, question=shared.question,
+        selected=payload.selected, score=shared.recommended_score, difficulty=shared.difficulty,
+        correct_answer=shared.correct_answer, options=shared.options, explanation=shared.explanation,
+        feedback_correct=shared.feedback_correct, feedback_incorrect=shared.feedback_incorrect,
+    ))
+    course.revision = payload.expected_revision + 1
+    result = db.execute(
+        update(Project)
+        .where(Project.id == project_id, Project.revision == payload.expected_revision)
+        .values(course_json=course.model_dump(mode="json"), revision=course.revision)
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
+    db.commit()
+    return get_project(project_id, user, db)
 
 
 def credential_response(item: AICredential) -> CredentialResponse:

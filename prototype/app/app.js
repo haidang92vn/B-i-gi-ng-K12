@@ -13,7 +13,8 @@ authForm.onsubmit=async e=>{e.preventDefault();const email=authEmailInput.value.
 async function loadLibrary(){const r=await fetch('/api/v1/projects');if(!r.ok)return;const items=await r.json();libraryList.innerHTML=items.length?items.map(p=>`<article class="library-item"><strong>${escapeHtml(p.title)}</strong><small>${p.status} • phiên bản ${p.revision}</small><div class="library-actions"><button onclick="openProject('${p.id}')">Mở</button><button onclick="copyProject('${p.id}')">Nhân bản</button><button onclick="archiveProject('${p.id}')">Lưu trữ</button><button onclick="deleteProject('${p.id}')">Xóa</button></div></article>`).join(''):'<p class="hint">Chưa có bài giảng nào.</p>';}
 libraryBtn.onclick=()=>{libraryDrawer.classList.add('open');loadLibrary();};closeLibraryBtn.onclick=()=>libraryDrawer.classList.remove('open');
 newLessonBtn.onclick=()=>{libraryDrawer.classList.remove('open');state={direction:'lesson',generated:null,project:null};location.reload();};
-async function openProject(id){const r=await fetch(`/api/v1/projects/${id}`);if(!r.ok)return;state.project=await r.json();const c=state.project.course;state.direction=c.metadata.direction;lessonTitle.value=c.metadata.title;state.generated={course:c,direction_name:{lesson:'Bài học mới',review:'Ôn tập – củng cố',advanced:'Nâng cao – mở rộng'}[c.metadata.direction],objectives:c.objectives.map(x=>x.text),sections:c.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',note:s.speaker_notes||''})),quizzes:c.question_bank.map(q=>({id:q.id,question:q.question,options:q.options,answer:q.correct_answer,quiz_type:q.type,selected:q.selected}))};renderAI();renderReview();renderQuiz();libraryDrawer.classList.remove('open');setStep(4);}
+function hydrateProject(project){state.project=project;const c=project.course;state.direction=c.metadata.direction;lessonTitle.value=c.metadata.title;state.generated={course:c,direction_name:{lesson:'Bài học mới',review:'Ôn tập – củng cố',advanced:'Nâng cao – mở rộng'}[c.metadata.direction],objectives:c.objectives.map(x=>x.text),sections:c.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',note:s.speaker_notes||'',status:s.status,layout:s.layout})),quizzes:c.question_bank.map(q=>({id:q.id,question:q.question,options:q.options,answer:q.correct_answer,quiz_type:q.type,selected:q.selected}))};}
+async function openProject(id){const r=await fetch(`/api/v1/projects/${id}`);if(!r.ok)return;hydrateProject(await r.json());renderAI();renderReview();renderQuiz();libraryDrawer.classList.remove('open');setStep(4);}
 const credentialsBtn = document.getElementById('credentialsBtn');
 const credentialsDrawer = document.getElementById('credentialsDrawer');
 const credentialsList = document.getElementById('credentialsList');
@@ -91,7 +92,7 @@ function syncCanonicalCourse(){
   course.metadata.direction=state.direction;
   course.objectives=g.objectives.map((text,i)=>({id:`o${i+1}`,text}));
   course.slides=g.sections.map((s,i)=>({
-    id:s.id || `s${i+1}`,title:s.title,layout:"content",status:"edited",
+    id:s.id || `s${i+1}`,title:s.title,layout:s.layout||"content",status:s.status||"ai_draft",
     blocks:[{id:`${s.id || `s${i+1}`}-text`,type:"text",text:s.content,settings:{}}],
     speaker_notes:s.note || null
   }));
@@ -110,16 +111,21 @@ async function createProjectFromGenerated(){
   if(!response.ok) throw new Error("Không thể lưu bản nháp bài giảng.");
   state.project=await response.json();
   state.generated.course=state.project.course;
+  state.generated.sections=state.project.course.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',note:s.speaker_notes||'',status:s.status,layout:s.layout}));
 }
 
 function scheduleSave(){
   if(!state.project)return;
   clearTimeout(saveTimer);
-  saveTimer=setTimeout(()=>persistGenerated().catch(()=>{}),700);
+  setSaveStatus("Chưa lưu — đang chờ thao tác dừng lại…","pending");
+  saveTimer=setTimeout(()=>persistGenerated().catch(error=>setSaveStatus(error.message||"Không thể lưu thay đổi. Nội dung vẫn còn trên màn hình.","error")),700);
 }
+
+function setSaveStatus(message,type="saved"){const target=document.getElementById("editorSaveStatus");if(!target)return;target.textContent=message;target.dataset.state=type;}
 
 async function persistGenerated(){
   if(!state.project)return;
+  setSaveStatus("Đang lưu bản nháp…","pending");
   const course=syncCanonicalCourse();
   const expected=state.project.revision;
   course.revision=expected+1;
@@ -128,6 +134,7 @@ async function persistGenerated(){
   if(!response.ok) throw new Error("Không thể lưu thay đổi bài giảng.");
   state.project=await response.json();
   state.generated.course=state.project.course;
+  setSaveStatus(`Đã lưu phiên bản ${state.project.revision}.`,"saved");
 }
 
 function renderAI(){
@@ -143,15 +150,26 @@ function renderAI(){
 
 function renderReview(){
   const g=state.generated;if(!g)return;
+  const layouts={content:"Nội dung",two_column:"Hai cột",callout:"Điểm nhấn",quiz:"Câu hỏi"};
   document.getElementById("reviewArea").className="";
   document.getElementById("reviewArea").innerHTML=`
     <div class="review-objectives"><h3>Mục tiêu bài học</h3>${g.objectives.map((o,i)=>`<input data-obj="${i}" value="${escapeHtml(o)}">`).join("")}</div>
-    ${g.sections.map((s,i)=>`<div class="review-section"><div class="row"><input data-sec-title="${i}" value="${escapeHtml(s.title)}"><textarea data-sec-content="${i}">${escapeHtml(s.content)}</textarea></div><button class="ghost" onclick="regenerateSection(${i})">Tạo lại phần này</button></div>`).join("")}
+    <div class="editor-toolbar"><strong>${g.sections.length} slide</strong><button class="ghost" onclick="addSection()">+ Thêm slide</button></div>
+    ${g.sections.map((s,i)=>`<div class="review-section"><div class="editor-section-head"><strong>Slide ${i+1}</strong><div class="editor-controls"><select data-sec-layout="${i}">${Object.entries(layouts).map(([id,label])=>`<option value="${id}" ${s.layout===id?"selected":""}>${label}</option>`).join("")}</select><select data-sec-status="${i}"><option value="ai_draft" ${s.status==="ai_draft"?"selected":""}>AI nháp</option><option value="edited" ${s.status==="edited"?"selected":""}>Đã sửa</option><option value="approved" ${s.status==="approved"?"selected":""}>Đã duyệt</option></select></div></div><div class="row"><input data-sec-title="${i}" value="${escapeHtml(s.title)}"><textarea data-sec-content="${i}">${escapeHtml(s.content)}</textarea></div><div class="editor-actions"><button class="ghost" onclick="moveSection(${i},-1)" ${i===0?"disabled":""}>↑</button><button class="ghost" onclick="moveSection(${i},1)" ${i===g.sections.length-1?"disabled":""}>↓</button><button class="ghost" onclick="duplicateSection(${i})">Nhân bản</button><button class="ghost" onclick="regenerateSection(${i})" ${s.status==="approved"?"disabled":""}>Tạo lại phần này</button><button class="ghost danger" onclick="deleteSection(${i})">Xóa</button></div></div>`).join("")}
   `;
   document.querySelectorAll("[data-obj]").forEach(el=>el.addEventListener("input",()=>{g.objectives[Number(el.dataset.obj)]=el.value;scheduleSave();}));
-  document.querySelectorAll("[data-sec-title]").forEach(el=>el.addEventListener("input",()=>{g.sections[Number(el.dataset.secTitle)].title=el.value;scheduleSave();}));
-  document.querySelectorAll("[data-sec-content]").forEach(el=>el.addEventListener("input",()=>{g.sections[Number(el.dataset.secContent)].content=el.value;scheduleSave();}));
+  document.querySelectorAll("[data-sec-title]").forEach(el=>el.addEventListener("input",()=>{const s=g.sections[Number(el.dataset.secTitle)];s.title=el.value;markEdited(s);scheduleSave();}));
+  document.querySelectorAll("[data-sec-content]").forEach(el=>el.addEventListener("input",()=>{const s=g.sections[Number(el.dataset.secContent)];s.content=el.value;markEdited(s);scheduleSave();}));
+  document.querySelectorAll("[data-sec-layout]").forEach(el=>el.addEventListener("change",()=>{const s=g.sections[Number(el.dataset.secLayout)];s.layout=el.value;markEdited(s);scheduleSave();}));
+  document.querySelectorAll("[data-sec-status]").forEach(el=>el.addEventListener("change",()=>{g.sections[Number(el.dataset.secStatus)].status=el.value;scheduleSave();renderReview();}));
 }
+
+function editorId(prefix){return `${prefix}-${globalThis.crypto?.randomUUID?globalThis.crypto.randomUUID():Date.now().toString(36)}`;}
+function markEdited(section){if(section.status!=="approved")section.status="edited";}
+function addSection(){const g=state.generated;g.sections.push({id:editorId("slide"),title:"Slide mới",content:"Nhập nội dung cho slide này.",note:"",status:"edited",layout:"content"});renderReview();scheduleSave();}
+function duplicateSection(index){const original=state.generated.sections[index];state.generated.sections.splice(index+1,0,{...original,id:editorId("slide"),title:`${original.title} (bản sao)`,status:"edited"});renderReview();scheduleSave();}
+function deleteSection(index){if(!confirm("Xóa slide này?"))return;state.generated.sections.splice(index,1);renderReview();scheduleSave();}
+function moveSection(index,offset){const sections=state.generated.sections,target=index+offset;if(target<0||target>=sections.length)return;[sections[index],sections[target]]=[sections[target],sections[index]];renderReview();scheduleSave();}
 
 async function regenerateSection(index){
   if(!state.project){alert('Hãy lưu bản nháp bài giảng trước.');return;}
@@ -160,8 +178,8 @@ async function regenerateSection(index){
   if(!response.ok){alert((await apiMessage(response))||'Không thể tạo lại phần này.');return;}
   state.project=await response.json();
   const slide=state.project.course.slides.find(x=>x.id===section.id);
-  section.title=slide.title;section.content=slide.blocks.find(x=>x.type==='text')?.text||'';section.note=slide.speaker_notes||'';
-  state.generated.course=state.project.course;renderAI();renderReview();
+  section.title=slide.title;section.content=slide.blocks.find(x=>x.type==='text')?.text||'';section.note=slide.speaker_notes||'';section.status=slide.status;section.layout=slide.layout;
+  state.generated.course=state.project.course;setSaveStatus(`Đã tạo lại slide và lưu phiên bản ${state.project.revision}.`,"saved");renderAI();renderReview();
 }
 
 const quizTypeLabels={single:"Một đáp án",multiple:"Nhiều đáp án",truefalse:"Đúng / Sai",fill:"Điền từ",matching:"Ghép đôi",ordering:"Sắp xếp",dragdrop:"Kéo thả",image:"Chọn hình ảnh"};

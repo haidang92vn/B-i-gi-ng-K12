@@ -84,6 +84,21 @@ class PrototypeTests(unittest.TestCase):
         rejected = client.post(f"/api/v1/projects/{before['id']}/slides/{first_slide_id}/regenerate", json={"source": "Không được ghi đè.", "provider": "mock", "expected_revision": 3})
         self.assertEqual(rejected.status_code, 409, rejected.text)
 
+    def test_slide_reorder_persists_with_revision_protection(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"teacher-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        generated = client.post("/api/generate", json={"title": "Bài sắp xếp", "source": "Ý một. Ý hai.", "provider": "mock"}).json()
+        project = client.post("/api/v1/projects", json={"title": "Bài sắp xếp", "direction": "lesson", "course": generated["course"]}).json()
+        reordered = project["course"]
+        original_ids = [slide["id"] for slide in reordered["slides"]]
+        reordered["slides"] = list(reversed(reordered["slides"]))
+        reordered["revision"] = 2
+        saved = client.patch(f"/api/v1/projects/{project['id']}", json={"expected_revision": 1, "course": reordered})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual([slide["id"] for slide in saved.json()["course"]["slides"]], list(reversed(original_ids)))
+        stale = client.patch(f"/api/v1/projects/{project['id']}", json={"expected_revision": 1, "course": reordered})
+        self.assertEqual(stale.status_code, 409, stale.text)
+
     def test_project_course_persists_and_revision_conflicts_are_rejected(self):
         client = TestClient(self.module.app)
         title = f"Kiểm thử persistence {uuid4()}"

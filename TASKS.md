@@ -64,12 +64,12 @@ Acceptance:
 - teacher can regenerate a single section.
 
 ## Milestone 06 — Course editor [P0]
-- [ ] Edit objectives.
-- [ ] Add/remove/reorder/duplicate slide.
-- [ ] Reusable slide layouts.
-- [ ] Per-slide AI regenerate.
-- [ ] Draft/edited/approved states.
-- [ ] Autosave/debounced save.
+- [x] Edit objectives.
+- [x] Add/remove/reorder/duplicate slide.
+- [x] Reusable slide layouts.
+- [x] Per-slide AI regenerate.
+- [x] Draft/edited/approved states.
+- [x] Autosave/debounced save.
 
 Acceptance:
 - refresh does not lose approved edits;

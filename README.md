@@ -104,6 +104,10 @@ The lesson, review and advanced directions use distinct generation strategies. E
 
 At the teacher-review step, **Tạo lại phần này** replaces only the chosen slide and increments the project revision. The endpoint refuses to overwrite a slide whose status is `approved`, and also rejects stale revisions so changes from another session are not silently lost.
 
+## Milestone 06: course editor
+
+The review step is now the course editor: teachers edit objectives and slide text, choose a reusable layout (`content`, `two_column`, `callout`, `quiz`), set `AI nháp` / `Đã sửa` / `Đã duyệt`, and add, delete, duplicate or reorder slides. Changes are debounced and saved with optimistic revisions. The editor reports a save conflict or network failure while keeping the unsaved values in the current browser session for recovery.
+
 ## Cấu trúc repository thực tế
 
 ```text

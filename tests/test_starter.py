@@ -83,6 +83,12 @@ class PrototypeTests(unittest.TestCase):
         self.assertIn('adlcp:scormType="sco"', manifest)
         self.assertIn('href="index.html"', manifest)
 
+    def test_scorm_validator_rejects_missing_or_unsafe_files(self):
+        files = {"imsmanifest.xml": b"<manifest><resource href='file:///bad'/></manifest>", "index.html": b"", "runtime.js": b""}
+        errors = self.module.validate_scorm_package(files, passing_score=101, completion_percent=90)
+        self.assertTrue(any("Passing score" in error for error in errors))
+        self.assertTrue(any("Unsafe manifest" in error for error in errors))
+
     def test_runtime_tracks_core_scorm_2004_fields(self):
         runtime = self.module.runtime_js()
         for token in ["API_1484_11", "Initialize", "SetValue", "Commit", "Terminate"]:

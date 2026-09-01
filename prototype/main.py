@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, ValidationError
 from typing import List, Literal, Optional
 from pathlib import Path
 import io, zipfile, html, json, re
+from xml.etree import ElementTree
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -653,6 +654,39 @@ def scorm_manifest(title: str):
   </resources>
 </manifest>'''
 
+
+def validate_scorm_package(files: dict[str, bytes], *, passing_score: int, completion_percent: int) -> list[str]:
+    """Return deterministic package errors; an empty list means export-ready."""
+    errors: list[str] = []
+    required = {"imsmanifest.xml", "index.html", "runtime.js"}
+    missing = required - set(files)
+    if missing:
+        errors.append(f"Missing root files: {', '.join(sorted(missing))}.")
+    if not 0 <= passing_score <= 100:
+        errors.append("Passing score must be between 0 and 100.")
+    if not 0 <= completion_percent <= 100:
+        errors.append("Completion percentage must be between 0 and 100.")
+    manifest = files.get("imsmanifest.xml", b"")
+    try:
+        root = ElementTree.fromstring(manifest)
+        resources = [node for node in root.iter() if node.tag.endswith("resource")]
+        sco = next((node for node in resources if node.attrib.get("{http://www.adlnet.org/xsd/adlcp_v1p3}scormType") == "sco"), None)
+        if sco is None or sco.attrib.get("href") != "index.html":
+            errors.append("Manifest must declare index.html as a SCORM SCO launch resource.")
+        for node in root.iter():
+            href = node.attrib.get("href")
+            if href and (href.startswith(("/", "file:", "http:")) or ".." in href):
+                errors.append(f"Unsafe manifest reference: {href}.")
+            if href and href not in files:
+                errors.append(f"Manifest reference is missing from ZIP: {href}.")
+    except ElementTree.ParseError:
+        errors.append("imsmanifest.xml is not valid XML.")
+    if b"API_1484_11" not in files.get("runtime.js", b""):
+        errors.append("SCORM 2004 runtime adapter is missing.")
+    if b"runtime.js" not in files.get("index.html", b""):
+        errors.append("Player does not reference runtime.js.")
+    return errors
+
 def runtime_js():
     return r'''
 let API = null;
@@ -907,11 +941,13 @@ window.addEventListener("load",()=>{{
 
 @app.post("/api/export-scorm")
 def export_scorm(req: ExportRequest):
+    files = {"imsmanifest.xml": scorm_manifest(req.title).encode(), "index.html": build_course_html(req).encode(), "runtime.js": runtime_js().encode()}
+    errors = validate_scorm_package(files, passing_score=req.passing_score, completion_percent=req.completion_percent)
+    if errors:
+        raise HTTPException(status_code=422, detail={"code": "SCORM_PACKAGE_INVALID", "errors": errors})
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("imsmanifest.xml", scorm_manifest(req.title))
-        z.writestr("index.html", build_course_html(req))
-        z.writestr("runtime.js", runtime_js())
+        for name, content in files.items(): z.writestr(name, content)
     mem.seek(0)
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", req.title).strip("_") or "bai_giang"
     return StreamingResponse(

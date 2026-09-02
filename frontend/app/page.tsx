@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import CourseEditor from "@/app/course-editor";
+import ExportStudio from "@/app/export-studio";
 import LmsSettingsEditor from "@/app/lms-settings";
 import PlayerStudio from "@/app/player-studio";
 import QuizEditor from "@/app/quiz-editor";
@@ -123,6 +124,7 @@ export default function Home() {
   const [playerState, setPlayerState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa dựng player" });
   const [scormState, setScormState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa cấu hình" });
   const [scormSaved, setScormSaved] = useState(true);
+  const [exportState, setExportState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Sẵn sàng kiểm tra và xuất" });
 
   useEffect(() => {
     currentTeacher().then(setTeacher).catch(() => setTeacher(null));
@@ -157,6 +159,7 @@ export default function Home() {
           setQuizState({ tone: "saved", message: `${latest.course.question_bank.filter((question) => question.selected).length} câu đang chọn` });
           setPlayerState({ tone: "saved", message: `Player canonical • bản ${latest.revision}` });
           setScormState({ tone: "saved", message: `${latest.course.scorm?.preset === "custom" ? "Tùy chỉnh" : "K12Online"} • bản ${latest.revision}` });
+          setExportState({ tone: "idle", message: "Sẵn sàng kiểm tra và xuất" });
           setScormSaved(true);
           setQuizSaved(true);
         }
@@ -340,6 +343,7 @@ export default function Home() {
       setPlayerState({ tone: "saved", message: `Sẵn sàng dựng • bản ${updated.revision}` });
       setScormState({ tone: "saved", message: `K12Online • bản ${updated.revision}` });
       setScormSaved(true);
+      setExportState({ tone: "idle", message: "Nội dung mới, nên kiểm tra trước khi xuất" });
       return true;
     } catch (reason) {
       setGenerationState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể tạo nội dung bằng AI." });
@@ -434,6 +438,7 @@ export default function Home() {
     setPlayerState({ tone: "idle", message: "Chưa dựng player" });
     setScormState({ tone: "idle", message: "Chưa cấu hình" });
     setScormSaved(true);
+    setExportState({ tone: "idle", message: "Sẵn sàng kiểm tra và xuất" });
     setActiveStep(1);
   }
 
@@ -459,6 +464,7 @@ export default function Home() {
     setPlayerState({ tone: "idle", message: "Chưa dựng player" });
     setScormState({ tone: "idle", message: "Chưa cấu hình" });
     setScormSaved(true);
+    setExportState({ tone: "idle", message: "Sẵn sàng kiểm tra và xuất" });
   }
 
   return (
@@ -637,8 +643,16 @@ export default function Home() {
                 onSaveState={(tone, message, saved) => { setScormState({ tone, message }); setScormSaved(saved); }}
               />
             </>
+          ) : activeStep === 8 && project ? (
+            <>
+              <div className="section-heading">
+                <div><span className="task-label">TASK 08</span><h2>Kiểm tra và xuất SCORM</h2><p>Rà soát chất lượng, để backend xác thực kỹ thuật rồi tải ZIP SCORM 2004 đã được chấp nhận.</p></div>
+                <span className={`status-pill ${exportState.tone}`} role="status">{exportState.message}</span>
+              </div>
+              <ExportStudio key={project.id} project={project} onStatus={(tone, message) => setExportState({ tone, message })} />
+            </>
           ) : (
-            <div className="step-placeholder"><span>{String(activeStep).padStart(2, "0")}</span><h2>{steps[activeStep - 1][0]}</h2><p>Chức năng này tiếp tục dùng bản prototype ổn định và sẽ được chuyển sang TypeScript ở milestone kế tiếp.</p></div>
+            <div className="step-placeholder"><span>{String(activeStep).padStart(2, "0")}</span><h2>{steps[activeStep - 1][0]}</h2><p>Hãy tạo hoặc mở một bài giảng có nội dung để tiếp tục quy trình.</p></div>
           )}
         </section>
 

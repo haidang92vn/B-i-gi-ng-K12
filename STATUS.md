@@ -58,15 +58,17 @@ contracts for the production architecture. It is **not yet the complete producti
   Step 6 embeds the backend-rendered canonical HTML5 player and supports per-slide AI image/TTS,
   validated teacher uploads, approved HTTPS URLs and explicit asset attachment. Step 7 persists
   the K12Online/custom preset, navigation, completion and independent score/completion/success
-  tracking switches, then refreshes the canonical player. See
-  `docs/FRONTEND_MIGRATION.md`.
+  tracking switches, then refreshes the canonical player. Step 8 displays the deterministic
+  quality report, asks FastAPI to validate/package the saved canonical project, downloads only a
+  successful ZIP and shows the project's ready-export metadata. See `docs/FRONTEND_MIGRATION.md`.
 
 ### Not implemented yet
 
 - Production PostgreSQL project library (the local prototype uses SQLite; deployment must run the Alembic migration against PostgreSQL).
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
-- Completion of the production Next.js frontend beyond authentication, Steps 1–7 and the workflow shell,
-  plus actual background-job handlers (the current Compose worker only validates Redis connectivity).
+- Production deployment cutover from the FastAPI-served prototype UI to the complete Next.js
+  frontend, plus actual background-job handlers (the current Compose worker only validates Redis
+  connectivity).
 - A real de-identified K12Online export/field dictionary, school retention approval and any official API/webhook specification. The generic report-import prototype must be mapped and accepted before live use; see `docs/ANALYTICS.md`.
 - Execution of the controlled Trường Tiểu học Trần Quốc Toản production runbook by the approved VPS operator and school administrator; see `docs/ONBOARDING_TRAN_QUOC_TOAN.md`.
 

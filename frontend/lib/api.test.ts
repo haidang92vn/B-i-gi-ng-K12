@@ -3,11 +3,15 @@ import {
   addProjectMediaUrl,
   attachProjectMedia,
   createProject,
+  exportScorm,
+  filenameFromContentDisposition,
   generateSlideTTS,
   generateCourse,
   getProject,
+  listExports,
   populateProjectFromGeneration,
   regenerateProjectSlide,
+  runQualityCheck,
   updateCanonicalCourse,
   updateProjectDirection,
   updateProjectTitle,
@@ -198,5 +202,44 @@ describe("Canonical project API", () => {
     expect(urlBody.rights_confirmed).toBe(true);
     const attachBody = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
     expect(attachBody).toEqual({ asset_id: "asset-url", expected_revision: 3 });
+  });
+
+  it("checks only the saved canonical project for authoring guidance", async () => {
+    const report = { course_id: project.id, revision: 3, score: 92, summary: { warnings: 1, info: 0, checked_slides: 1, checked_questions: 0 }, findings: [], blocking: false };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(report), { status: 200 }));
+
+    await expect(runQualityCheck(project.id)).resolves.toEqual(report);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/projects/course-1/quality-check", { credentials: "include" });
+  });
+
+  it("requests an export by project id and returns a server-validated ZIP", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Blob(["zip"]), {
+      status: 200,
+      headers: { "Content-Disposition": "attachment; filename=lesson_SCORM2004.zip", "X-Export-Id": "export-1", "X-SCORM-Warning-Count": "2" },
+    }));
+
+    const result = await exportScorm(project);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/export-scorm", expect.objectContaining({ method: "POST", credentials: "include" }));
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body.project_id).toBe(project.id);
+    expect(body.title).toBe(project.title);
+    expect(JSON.stringify(body)).not.toContain("secret");
+    expect(result.filename).toBe("lesson_SCORM2004.zip");
+    expect(result.exportId).toBe("export-1");
+    expect(result.warningCount).toBe(2);
+  });
+
+  it("reads export metadata without requesting an object-storage download", async () => {
+    const records = [{ id: "export-1", project_id: project.id, filename: "lesson.zip", byte_size: 100, status: "ready", created_at: null }];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(records), { status: 200 }));
+
+    await expect(listExports()).resolves.toEqual(records);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/exports", { credentials: "include" });
+  });
+
+  it("uses a safe fallback filename for incomplete response headers", () => {
+    expect(filenameFromContentDisposition("attachment; filename=../lesson.zip")).toBe(".._lesson.zip");
+    expect(filenameFromContentDisposition(null)).toBe("bai_giang_SCORM2004.zip");
   });
 });

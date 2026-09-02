@@ -144,6 +144,13 @@ canonical course. K12Online restores the documented defaults; individual changes
 preset. Player preview and project export now use these saved values, including progress visibility
 and independent score/completion/success tracking.
 
+The Next.js Step 8 screen keeps export authoritative on FastAPI: it shows deterministic,
+non-blocking authoring-quality guidance for the saved `course.json`, then requests a package by
+project ID. FastAPI rebuilds from canonical data, validates the SCORM file map and ZIP before
+recording/exporting it. The browser immediately receives the successful ZIP and shows only the
+current project's export metadata history. This technical gate does not certify real K12Online
+interoperability; use the manual tenant test checklist before release.
+
 ## Milestone 11: production deployment
 
 The repository now includes `docker-compose.yml`, Caddy HTTPS configuration, explicit Alembic

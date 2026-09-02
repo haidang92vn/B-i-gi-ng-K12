@@ -133,6 +133,46 @@ export type MediaAsset = {
   warning: string | null;
 };
 
+export type QualityFinding = {
+  code: string;
+  severity: "warning" | "info";
+  scope: "course" | "slide" | "question";
+  item_id: string | null;
+  title: string;
+  message: string;
+  suggestion: string;
+};
+
+export type QualityReport = {
+  course_id: string;
+  revision: number;
+  score: number;
+  summary: {
+    warnings: number;
+    info: number;
+    checked_slides: number;
+    checked_questions: number;
+  };
+  findings: QualityFinding[];
+  blocking: false;
+};
+
+export type ExportRecord = {
+  id: string;
+  project_id: string | null;
+  filename: string;
+  byte_size: number;
+  status: string;
+  created_at: string | null;
+};
+
+export type ScormExport = {
+  blob: Blob;
+  filename: string;
+  exportId: string | null;
+  warningCount: number;
+};
+
 export type GenerationResponse = {
   course: CanonicalCourse;
   objectives: string[];
@@ -152,12 +192,18 @@ export type GenerationResponse = {
 
 async function message(response: Response) {
   try {
-    const body = (await response.json()) as { detail?: string | { message?: string } };
+    const body = (await response.json()) as { detail?: string | { message?: string; errors?: string[] } };
     if (typeof body.detail === "string") return body.detail;
-    return body.detail?.message ?? "";
+    return body.detail?.message ?? body.detail?.errors?.[0] ?? "";
   } catch {
     return "";
   }
+}
+
+export function filenameFromContentDisposition(header: string | null, fallback = "bai_giang_SCORM2004.zip") {
+  const match = header?.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+  const filename = match?.[1] ? decodeURIComponent(match[1]) : match?.[2];
+  return filename?.replace(/[\\/]/g, "_") || fallback;
 }
 
 export async function currentTeacher(): Promise<Teacher | null> {
@@ -429,4 +475,59 @@ export async function attachProjectMedia(project: Project, slideId: string, asse
   if (response.status === 409) throw new Error("Bản nháp đã được cập nhật ở phiên khác.");
   if (!response.ok) throw new Error((await message(response)) || "Không thể gắn media vào slide.");
   return response.json() as Promise<Project>;
+}
+
+export async function runQualityCheck(projectId: string): Promise<QualityReport> {
+  const response = await fetch(`/api/v1/projects/${projectId}/quality-check`, { credentials: "include" });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể kiểm tra chất lượng bài giảng.");
+  return response.json() as Promise<QualityReport>;
+}
+
+export async function listExports(): Promise<ExportRecord[]> {
+  const response = await fetch("/api/v1/exports", { credentials: "include" });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tải lịch sử xuất bản.");
+  return response.json() as Promise<ExportRecord[]>;
+}
+
+function exportPayload(project: Project) {
+  const course = project.course;
+  return {
+    project_id: project.id,
+    // The legacy request fields only satisfy the current adapter. The project id tells
+    // FastAPI to rebuild exclusively from saved canonical course.json.
+    title: project.title,
+    direction: course.metadata.direction,
+    objectives: course.objectives.map((objective) => objective.text),
+    sections: course.slides.map((slide) => ({
+      id: slide.id,
+      title: slide.title,
+      content: slide.blocks.filter((block) => ["heading", "text", "callout"].includes(block.type)).map((block) => block.text || "").join("\n"),
+      note: slide.speaker_notes || "",
+    })),
+    quizzes: course.question_bank.filter((question) => question.selected).map((question) => ({
+      id: question.id,
+      question: question.question,
+      options: question.options,
+      answer: question.correct_answer,
+      quiz_type: question.type,
+      selected: question.selected,
+      settings: question.settings,
+    })),
+  };
+}
+
+export async function exportScorm(project: Project): Promise<ScormExport> {
+  const response = await fetch("/api/export-scorm", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(exportPayload(project)),
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể đóng gói SCORM.");
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get("Content-Disposition")),
+    exportId: response.headers.get("X-Export-Id"),
+    warningCount: Number(response.headers.get("X-SCORM-Warning-Count") || "0") || 0,
+  };
 }

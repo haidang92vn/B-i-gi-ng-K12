@@ -175,7 +175,10 @@ Acceptance:
 - [x] Migrate Step 3 AI provider/credential selection and populate the same canonical draft.
 - [x] Migrate Step 4 teacher review with objective/slide editing, autosave and targeted regeneration.
 - [x] Migrate Step 5 question-bank selection and complete quiz authoring fields.
-- [ ] Migrate Steps 3–8 incrementally; remove a prototype screen only after its replacement passes acceptance tests.
+- [x] Migrate Step 6 HTML5 player preview and media/TTS attachment workflow.
+- [x] Migrate Step 7 canonical LMS/SCORM settings workflow.
+- [x] Migrate Step 8 quality check, backend SCORM validation, ZIP download and export history.
+- [x] Migrate Steps 3–8 incrementally; remove a prototype screen only after its replacement passes acceptance tests.
 
 Acceptance for this first slice:
 - Next.js production build and strict TypeScript check pass;

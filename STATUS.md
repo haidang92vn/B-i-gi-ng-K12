@@ -24,7 +24,7 @@ contracts for the production architecture. It is **not yet the complete producti
 - Lesson, review and advanced AI storyboarding with a larger question bank than the initially selected quiz set; per-slide regeneration preserves other slides and rejects overwriting approved slides.
 - Non-sensitive generation metadata (provider, model, request ID and token counts when supplied) is stored in `generation_runs` and linked to the created project.
 - Course editor supports objectives and slide editing, add/delete/duplicate/reorder, reusable layout IDs, and `ai_draft`/`edited`/`approved` states. Debounced autosave reports conflict/failure instead of discarding unsaved work.
-- Quiz bank editor persists question text, options, answer, explanation, feedback, score, difficulty, objective links and selected state. Deterministic exact-match scoring supports single/multiple choice, true/false, fill, matching and ordering; drag/drop and image interactions remain deferred.
+- Quiz bank editor persists question text, options, answer, explanation, feedback, score, difficulty, objective links and selected state. Deterministic scoring and the HTML5 player cover single/multiple choice, true/false, fill, matching, ordering, drag/drop and asset-backed image interactions.
 - HTML5 player preview renders directly from the canonical project through the same renderer used by SCORM export. It includes progress, menu, fullscreen, responsive layouts, navigation restrictions and escaping for both HTML text and JSON embedded in scripts.
 - SCORM runtime tracks location, suspend data, progress, score, completion, success and session time. A fake `API_1484_11` harness verifies resume and the independence of completion/success without an LMS.
 - SCORM export validates manifest, root files, launch resource, runtime and configuration before packaging. Ready packages are stored in R2-compatible storage with per-teacher export metadata; manual K12Online/SCORM Cloud verification uses `docs/LMS_COMPATIBILITY_TEST.md`.
@@ -54,14 +54,16 @@ contracts for the production architecture. It is **not yet the complete producti
   edits objectives and slides, manages review states and slide order, autosaves with revision
   protection and can regenerate one unapproved slide without touching its siblings. Step 5 keeps
   selected and unselected questions in the canonical bank while editing all quiz types, scores,
-  difficulty, structured answers, feedback and objective links with the same revision protection. See
+  difficulty, structured answers, feedback and objective links with the same revision protection.
+  Step 6 embeds the backend-rendered canonical HTML5 player and supports per-slide AI image/TTS,
+  validated teacher uploads, approved HTTPS URLs and explicit asset attachment. See
   `docs/FRONTEND_MIGRATION.md`.
 
 ### Not implemented yet
 
 - Production PostgreSQL project library (the local prototype uses SQLite; deployment must run the Alembic migration against PostgreSQL).
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
-- Completion of the production Next.js frontend beyond authentication, Steps 1–5 and the workflow shell,
+- Completion of the production Next.js frontend beyond authentication, Steps 1–6 and the workflow shell,
   plus actual background-job handlers (the current Compose worker only validates Redis connectivity).
 - A real de-identified K12Online export/field dictionary, school retention approval and any official API/webhook specification. The generic report-import prototype must be mapped and accepted before live use; see `docs/ANALYTICS.md`.
 - Execution of the controlled Trường Tiểu học Trần Quốc Toản production runbook by the approved VPS operator and school administrator; see `docs/ONBOARDING_TRAN_QUOC_TOAN.md`.

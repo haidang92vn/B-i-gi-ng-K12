@@ -6,6 +6,8 @@ At step 6, the teacher selects a slide and can create an image, create per-slide
 upload a file, or register a public HTTPS media URL. Each operation first creates a private
 **draft media asset** for preview. It becomes part of the lesson only after the teacher chooses
 **Gắn vào slide**. The canonical course data then receives a `Block` with the media `asset_id`;
+the Next.js Step 6 screen uses this exact API workflow and refreshes the embedded canonical player
+after attachment. The media bytes remain in object storage;
 the binary object itself is never persisted in generated HTML or `course.json`.
 
 OpenAI and Gemini are isolated behind the server-side media-provider adapter. Their stored API

@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  addProjectMediaUrl,
+  attachProjectMedia,
   createProject,
+  generateSlideTTS,
   generateCourse,
   getProject,
   populateProjectFromGeneration,
@@ -8,6 +11,7 @@ import {
   updateCanonicalCourse,
   updateProjectDirection,
   updateProjectTitle,
+  uploadProjectMedia,
   uploadProjectSource,
   type GenerationResponse,
   type Project,
@@ -156,5 +160,43 @@ describe("Canonical project API", () => {
 
     await expect(updateCanonicalCourse(project, project.course)).rejects.toThrow("phiên khác");
     await expect(getProject(project.id)).resolves.toEqual(latest);
+  });
+
+  it("keeps provider secrets out of per-slide TTS requests", async () => {
+    const media = { id: "asset-1", project_id: project.id, slide_id: "slide/1", kind: "audio" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(media), { status: 201 }));
+
+    await generateSlideTTS(project.id, "slide/1", { text: "Lời đọc", voice: "Kore", provider: "gemini", credentialId: "credential-2" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/projects/course-1/slides/slide%2F1/tts");
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body).toEqual({ text: "Lời đọc", voice: "Kore", provider: "gemini", credential_id: "credential-2" });
+    expect(JSON.stringify(body)).not.toContain("secret");
+  });
+
+  it("uploads teacher media as multipart and confirms rights server-side", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ id: "asset-1" }), { status: 201 }));
+
+    await uploadProjectMedia(project.id, "slide 1", new File(["image"], "lesson.png", { type: "image/png" }));
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/projects/course-1/media/upload?slide_id=slide%201&rights_confirmed=true");
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(request.body).toBeInstanceOf(FormData);
+    expect(request.headers).toBeUndefined();
+  });
+
+  it("confirms URL rights and attaches media with the current revision", async () => {
+    const updated = { ...project, revision: 4 };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "asset-url" }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(updated), { status: 200 }));
+
+    await addProjectMediaUrl(project.id, "s1", { kind: "image", url: "https://example.test/image.png", label: "Minh họa" });
+    await attachProjectMedia(project, "s1", "asset-url");
+
+    const urlBody = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(urlBody.rights_confirmed).toBe(true);
+    const attachBody = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
+    expect(attachBody).toEqual({ asset_id: "asset-url", expected_revision: 3 });
   });
 });

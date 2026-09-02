@@ -21,6 +21,9 @@ Included now:
 - add, duplicate, reorder and delete slide operations plus targeted regeneration of unapproved slides;
 - Step 5 question-bank filtering, selection and full canonical quiz-field editing;
 - structured authoring for matching, ordering, drag/drop and asset-backed image interactions;
+- Step 6 authenticated HTML5 player preview rendered by the existing backend;
+- per-slide AI image/TTS preview, validated upload and approved HTTPS URL media workflows;
+- explicit media attachment that stores only an `asset_id` reference in the canonical slide;
 - a same-origin `/api/*` rewrite to FastAPI.
 
 The browser never receives stored teacher AI credentials. `course.json` remains canonical and no
@@ -101,6 +104,15 @@ the deterministic backend scoring rules. Per-question warnings identify missing 
 options, scores and objective links. Autosave and conflict recovery use the same guarded revision
 workflow as Step 4.
 
-The next slice implements Step 6 HTML5 lesson building and preview in Next.js. It will render from
-the saved canonical project through the backend player and migrate the related media/TTS preview,
-rights confirmation and slide-attachment workflow without persisting generated HTML as source.
+Step 6 embeds the authenticated backend player, so preview and SCORM export reuse the same renderer
+instead of maintaining a browser-only HTML generator. The preview reloads after a canonical revision
+change. Teachers select a target slide, create an AI image or TTS draft, upload a validated file, or
+register an approved public HTTPS URL. Media remains a private draft until the teacher explicitly
+attaches it; that action advances the project revision and adds only the asset ID to the slide. The
+frontend performs early type/size checks and the backend remains authoritative for signatures,
+rights, ownership and URL safety. Viewers can use the player and inspect attached media but cannot
+create or attach assets.
+
+The next slice implements Step 7 LMS/SCORM settings in Next.js. It will edit canonical navigation,
+completion and SCORM 2004/K12Online preset fields through the existing optimistic revision guard,
+then refresh the same player preview without claiming live LMS compatibility.

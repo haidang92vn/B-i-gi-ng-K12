@@ -56,6 +56,22 @@ export type CanonicalCourse = {
   objectives: Array<{ id: string; text: string }>;
   slides: CourseSlide[];
   question_bank: CourseQuestion[];
+  theme?: {
+    id: string;
+    primary_color?: string | null;
+    font_family?: string | null;
+    logo_asset_id?: string | null;
+  };
+  navigation?: {
+    mode: "free" | "sequential" | "restricted";
+    show_menu: boolean;
+    show_progress: boolean;
+  };
+  completion?: {
+    viewed_percent: number;
+    passing_score: number;
+    require_quiz: boolean;
+  };
   [key: string]: unknown;
 };
 
@@ -84,6 +100,26 @@ export type AICredential = {
   secret_last4: string;
   model_default: string | null;
   status: string;
+};
+
+export type MediaKind = "image" | "audio" | "video";
+
+export type MediaAsset = {
+  id: string;
+  project_id: string;
+  slide_id: string | null;
+  kind: MediaKind;
+  source_type: "upload" | "url" | "generated" | "tts";
+  original_name: string;
+  mime_type: string;
+  byte_size: number;
+  prompt: string | null;
+  provider: string | null;
+  model: string | null;
+  rights_confirmed: boolean;
+  status: string;
+  content_url: string;
+  warning: string | null;
 };
 
 export type GenerationResponse = {
@@ -296,5 +332,90 @@ export async function regenerateProjectSlide(project: Project, slideId: string, 
     }),
   });
   if (!response.ok) throw new Error((await message(response)) || "Không thể tạo lại slide này.");
+  return response.json() as Promise<Project>;
+}
+
+export async function listProjectMedia(projectId: string): Promise<MediaAsset[]> {
+  const response = await fetch(`/api/v1/projects/${projectId}/media`, { credentials: "include" });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tải danh sách media.");
+  return response.json() as Promise<MediaAsset[]>;
+}
+
+export async function generateSlideImage(projectId: string, slideId: string, input: {
+  prompt: string;
+  provider: AIProvider;
+  credentialId?: string;
+}): Promise<MediaAsset> {
+  const response = await fetch(`/api/v1/projects/${projectId}/slides/${encodeURIComponent(slideId)}/image`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt: input.prompt,
+      provider: input.provider,
+      credential_id: input.provider === "mock" ? null : input.credentialId || null,
+    }),
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tạo ảnh minh họa.");
+  return response.json() as Promise<MediaAsset>;
+}
+
+export async function generateSlideTTS(projectId: string, slideId: string, input: {
+  text: string;
+  voice: string;
+  provider: AIProvider;
+  credentialId?: string;
+}): Promise<MediaAsset> {
+  const response = await fetch(`/api/v1/projects/${projectId}/slides/${encodeURIComponent(slideId)}/tts`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text: input.text,
+      voice: input.voice,
+      provider: input.provider,
+      credential_id: input.provider === "mock" ? null : input.credentialId || null,
+    }),
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tạo giọng đọc.");
+  return response.json() as Promise<MediaAsset>;
+}
+
+export async function uploadProjectMedia(projectId: string, slideId: string, file: File): Promise<MediaAsset> {
+  const form = new FormData();
+  form.append("upload", file);
+  const response = await fetch(`/api/v1/projects/${projectId}/media/upload?slide_id=${encodeURIComponent(slideId)}&rights_confirmed=true`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tải media.");
+  return response.json() as Promise<MediaAsset>;
+}
+
+export async function addProjectMediaUrl(projectId: string, slideId: string, input: {
+  kind: MediaKind;
+  url: string;
+  label: string;
+}): Promise<MediaAsset> {
+  const response = await fetch(`/api/v1/projects/${projectId}/media/url?slide_id=${encodeURIComponent(slideId)}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...input, rights_confirmed: true }),
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể lưu URL media.");
+  return response.json() as Promise<MediaAsset>;
+}
+
+export async function attachProjectMedia(project: Project, slideId: string, assetId: string): Promise<Project> {
+  const response = await fetch(`/api/v1/projects/${project.id}/slides/${encodeURIComponent(slideId)}/media`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ asset_id: assetId, expected_revision: project.revision }),
+  });
+  if (response.status === 409) throw new Error("Bản nháp đã được cập nhật ở phiên khác.");
+  if (!response.ok) throw new Error((await message(response)) || "Không thể gắn media vào slide.");
   return response.json() as Promise<Project>;
 }

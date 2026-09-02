@@ -95,6 +95,7 @@ Acceptance:
 - [x] Free/sequential/restricted navigation.
 - [x] Theme/layout rendering.
 - [x] Safe rendering of teacher/AI text.
+- [x] Next.js Step 6 preview and media/TTS attachment workflow.
 
 Acceptance:
 - desktop/mobile usable;

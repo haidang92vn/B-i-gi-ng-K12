@@ -128,11 +128,16 @@ The review step is now the course editor: teachers edit objectives and slide tex
 
 ## Milestone 07: quiz bank and deterministic scoring
 
-Teachers can select or unselect AI-generated questions without deleting them, then edit the question, options, answer, explanation, feedback, score, difficulty and linked learning objectives. The canonical `question_bank` persists all these fields. `prototype/quiz_scoring.py` provides deterministic exact-match scoring for single choice, multiple choice, true/false, fill, matching and ordering. Drag/drop and image interaction rendering are intentionally deferred to the player work.
+Teachers can select or unselect AI-generated questions without deleting them, then edit the question, options, answer, explanation, feedback, score, difficulty and linked learning objectives. The canonical `question_bank` persists all these fields. `prototype/quiz_scoring.py` provides deterministic exact-match scoring, while the player renders single choice, multiple choice, true/false, fill, matching, ordering, drag/drop and asset-backed image interactions.
 
 ## Milestone 08: HTML5 player
 
 Use **Mở player HTML5** at the build step to preview the authenticated project. The player is rendered directly from canonical `course.json`, and the same `build_course_html` renderer is written to a SCORM export. It provides previous/next controls, progress, optional menu, fullscreen, responsive styling, navigation modes and reusable slide layouts. Authored text is HTML-escaped and JSON inserted into inline scripts escapes tag delimiters, preventing authored content from executing as script.
+
+The Next.js Step 6 screen embeds this backend renderer and provides the complete per-slide media
+workflow: AI image/TTS drafts, validated teacher uploads, approved public HTTPS URLs, preview, and
+explicit attachment. Attaching advances the canonical revision and stores only the asset reference;
+generated HTML remains transient output.
 
 ## Milestone 11: production deployment
 

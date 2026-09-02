@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import CourseEditor from "@/app/course-editor";
+import PlayerStudio from "@/app/player-studio";
 import QuizEditor from "@/app/quiz-editor";
 import {
   authenticate,
@@ -118,6 +119,7 @@ export default function Home() {
   const [reviewSaved, setReviewSaved] = useState(true);
   const [quizState, setQuizState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa chọn quiz" });
   const [quizSaved, setQuizSaved] = useState(true);
+  const [playerState, setPlayerState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa dựng player" });
 
   useEffect(() => {
     currentTeacher().then(setTeacher).catch(() => setTeacher(null));
@@ -150,6 +152,7 @@ export default function Home() {
           setReviewState({ tone: "saved", message: `Sẵn sàng duyệt • bản ${latest.revision}` });
           setReviewSaved(true);
           setQuizState({ tone: "saved", message: `${latest.course.question_bank.filter((question) => question.selected).length} câu đang chọn` });
+          setPlayerState({ tone: "saved", message: `Player canonical • bản ${latest.revision}` });
           setQuizSaved(true);
         }
       })
@@ -329,6 +332,7 @@ export default function Home() {
       setReviewSaved(true);
       setQuizState({ tone: "saved", message: `${updated.course.question_bank.filter((question) => question.selected).length} câu đang chọn` });
       setQuizSaved(true);
+      setPlayerState({ tone: "saved", message: `Sẵn sàng dựng • bản ${updated.revision}` });
       return true;
     } catch (reason) {
       setGenerationState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể tạo nội dung bằng AI." });
@@ -408,6 +412,7 @@ export default function Home() {
     setReviewSaved(true);
     setQuizState({ tone: "idle", message: "Chưa chọn quiz" });
     setQuizSaved(true);
+    setPlayerState({ tone: "idle", message: "Chưa dựng player" });
     setActiveStep(1);
   }
 
@@ -430,6 +435,7 @@ export default function Home() {
     setReviewSaved(true);
     setQuizState({ tone: "idle", message: "Chưa chọn quiz" });
     setQuizSaved(true);
+    setPlayerState({ tone: "idle", message: "Chưa dựng player" });
   }
 
   return (
@@ -578,6 +584,21 @@ export default function Home() {
                 project={project}
                 onProjectChange={setProject}
                 onSaveState={(tone, message, saved) => { setQuizState({ tone, message }); setQuizSaved(saved); }}
+              />
+            </>
+          ) : activeStep === 6 && project ? (
+            <>
+              <div className="section-heading">
+                <div><span className="task-label">TASK 06</span><h2>Dựng và xem trước bài giảng HTML5</h2><p>Kiểm tra player thật, tạo media theo slide rồi chủ động gắn tài sản phù hợp vào bài.</p></div>
+                <span className={`status-pill ${playerState.tone}`} role="status">{playerState.message}</span>
+              </div>
+              <PlayerStudio
+                key={project.id}
+                project={project}
+                provider={aiProvider}
+                credentialId={credentialId}
+                onProjectChange={setProject}
+                onStatus={(tone, message) => setPlayerState({ tone, message })}
               />
             </>
           ) : (

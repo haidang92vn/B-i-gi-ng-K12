@@ -79,6 +79,9 @@ DELETE /api/v1/projects/{project_id}/sources/{file_id}
 POST   /api/v1/projects/{project_id}/sources/{file_id}/extract
 ```
 
+Source responses include `created_at`; list responses are newest first so an authoring client can
+restore the most recent extracted source after refresh. File bytes remain in object storage.
+
 ## AI credentials
 ```text
 GET    /api/v1/ai/credentials

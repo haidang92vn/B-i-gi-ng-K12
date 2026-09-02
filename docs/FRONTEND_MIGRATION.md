@@ -11,7 +11,9 @@ Included now:
 - backend-owned email login/register using the existing HttpOnly session cookie;
 - Google OpenID Connect entry through the existing FastAPI endpoint;
 - a responsive navigation shell that keeps all eight teacher workflow steps recognizable;
-- a Step 1 title, source-text and source-file surface clearly marked as not yet saved;
+- a Step 1 title, source-text and source-file surface with explicit save/error state;
+- canonical draft creation, optimistic title revision updates and source persistence;
+- automatic restore of the latest active owned draft and its newest extracted source;
 - a same-origin `/api/*` rewrite to FastAPI.
 
 The browser never receives stored teacher AI credentials. `course.json` remains canonical and no
@@ -58,6 +60,10 @@ account or changing data.
 Migrate one workflow slice at a time. A prototype screen remains available until its Next.js
 replacement persists canonical data, passes its acceptance tests and survives refresh/reopen.
 
-The next slice connects Step 1 to the existing project creation and source-upload APIs. Acceptance
-requires one canonical draft (no duplicate project), validated TXT/PDF/DOCX/PPTX upload, visible
-failure states, and reopening the saved draft after refresh.
+Step 1 now reuses the open project instead of creating a new record for each save. Pasted text is
+stored as a UTF-8 source material version; uploaded TXT/PDF/DOCX/PPTX files remain in the configured
+object storage, while the frontend restores extracted text through the authenticated API.
+
+The next slice implements Step 2 direction selection. Acceptance requires the selected lesson,
+review or advanced direction to persist through an optimistic canonical revision update and remain
+selected after refresh without changing Step 1 source history.

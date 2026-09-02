@@ -385,6 +385,11 @@ class PrototypeTests(unittest.TestCase):
         uploaded = client.post(f"/api/v1/projects/{project['id']}/sources", files={"upload": ("lesson.txt", b"Noi dung bai hoc", "text/plain")})
         self.assertEqual(uploaded.status_code, 201, uploaded.text)
         self.assertEqual(uploaded.json()["extracted_text"], "Noi dung bai hoc")
+        self.assertIsNotNone(uploaded.json()["created_at"])
+        reopened_sources = client.get(f"/api/v1/projects/{project['id']}/sources")
+        self.assertEqual(reopened_sources.status_code, 200, reopened_sources.text)
+        self.assertEqual(reopened_sources.json()[0]["id"], uploaded.json()["id"])
+        self.assertEqual(reopened_sources.json()[0]["extracted_text"], "Noi dung bai hoc")
 
         generated_for_draft = client.post("/api/generate", json={"title": title, "source": "Noi dung da tai len.", "provider": "mock"})
         self.assertEqual(generated_for_draft.status_code, 200, generated_for_draft.text)

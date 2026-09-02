@@ -232,7 +232,7 @@ class SharedQuestionResponse(BaseModel):
     reviewed_at: datetime | None
 
 class SourceResponse(BaseModel):
-    id: str; original_name: str; mime_type: str; byte_size: int; extracted_text: str | None
+    id: str; original_name: str; mime_type: str; byte_size: int; extracted_text: str | None; created_at: datetime | None
 
 
 class MediaUrlRequest(BaseModel):
@@ -1366,12 +1366,17 @@ async def upload_source(project_id: str, upload: UploadFile = File(...), user: U
     storage.put(key, content, upload.content_type or "application/octet-stream")
     source = SourceMaterial(user_id=user.id, project_id=project_id, original_name=upload.filename or "source", mime_type=upload.content_type or "", byte_size=len(content), storage_key=key, extracted_text=extract_text(upload.content_type or "", content))
     db.add(source); db.commit(); db.refresh(source)
-    return SourceResponse(id=source.id, original_name=source.original_name, mime_type=source.mime_type, byte_size=source.byte_size, extracted_text=source.extracted_text)
+    return SourceResponse(id=source.id, original_name=source.original_name, mime_type=source.mime_type, byte_size=source.byte_size, extracted_text=source.extracted_text, created_at=source.created_at)
 
 @app.get("/api/v1/projects/{project_id}/sources", response_model=list[SourceResponse])
 def list_sources(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
     project_with_access(db, project_id, user)
-    return [SourceResponse(id=x.id, original_name=x.original_name, mime_type=x.mime_type, byte_size=x.byte_size, extracted_text=x.extracted_text) for x in db.scalars(select(SourceMaterial).where(SourceMaterial.project_id == project_id)).all()]
+    items = db.scalars(
+        select(SourceMaterial)
+        .where(SourceMaterial.project_id == project_id)
+        .order_by(SourceMaterial.created_at.desc(), SourceMaterial.id.desc())
+    ).all()
+    return [SourceResponse(id=x.id, original_name=x.original_name, mime_type=x.mime_type, byte_size=x.byte_size, extracted_text=x.extracted_text, created_at=x.created_at) for x in items]
 
 
 def media_warning(item: MediaAsset) -> str | None:

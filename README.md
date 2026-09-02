@@ -79,8 +79,9 @@ pnpm dev
 ```
 
 Mở `http://127.0.0.1:3000`. Frontend chuyển tiếp cùng nguồn các yêu cầu `/api/*` đến FastAPI,
-vì vậy cookie phiên HttpOnly không cần đưa vào JavaScript. Hiện phần đăng nhập và khung 8 bước
-đã có; màn hình prototype vẫn là phương án sử dụng ổn định cho các bước chưa được chuyển đổi.
+vì vậy cookie phiên HttpOnly không cần đưa vào JavaScript. Hiện phần đăng nhập, khung 8 bước và
+Bước 1 lưu/khôi phục bản nháp cùng học liệu đã có; màn hình prototype vẫn là phương án sử dụng
+ổn định cho các bước chưa được chuyển đổi.
 Xem [docs/FRONTEND_MIGRATION.md](docs/FRONTEND_MIGRATION.md).
 
 ## Milestone 01: canonical course + persistence

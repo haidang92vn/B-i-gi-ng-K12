@@ -1,4 +1,4 @@
-export type WorkflowDirection = "lesson" | "review" | "advanced";
+import type { WorkflowDirection } from "@/lib/api";
 
 export type CourseDraft = {
   title: string;

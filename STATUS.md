@@ -45,14 +45,15 @@ contracts for the production architecture. It is **not yet the complete producti
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 - A strict Next.js 16 + TypeScript frontend now covers backend-owned login/register, Google
   sign-in entry and a responsive eight-step workspace shell. It proxies `/api/*` to FastAPI so
-  the HttpOnly session remains same-origin. Step 1 is currently a UI surface only; canonical
-  project/source persistence is the next migration slice. See `docs/FRONTEND_MIGRATION.md`.
+  the HttpOnly session remains same-origin. Step 1 creates or updates one canonical draft, uploads
+  validated source material, shows explicit save/error state and restores the latest owned draft
+  plus its newest extracted source after refresh. See `docs/FRONTEND_MIGRATION.md`.
 
 ### Not implemented yet
 
 - Production PostgreSQL project library (the local prototype uses SQLite; deployment must run the Alembic migration against PostgreSQL).
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
-- Completion of the production Next.js frontend beyond authentication and the workflow shell,
+- Completion of the production Next.js frontend beyond authentication, Step 1 and the workflow shell,
   plus actual background-job handlers (the current Compose worker only validates Redis connectivity).
 - A real de-identified K12Online export/field dictionary, school retention approval and any official API/webhook specification. The generic report-import prototype must be mapped and accepted before live use; see `docs/ANALYTICS.md`.
 - Execution of the controlled Trường Tiểu học Trần Quốc Toản production runbook by the approved VPS operator and school administrator; see `docs/ONBOARDING_TRAN_QUOC_TOAN.md`.

@@ -104,6 +104,22 @@ export async function updateProjectTitle(project: Project, title: string): Promi
   return response.json() as Promise<Project>;
 }
 
+export async function updateProjectDirection(project: Project, direction: WorkflowDirection): Promise<Project> {
+  const course: CanonicalCourse = {
+    ...project.course,
+    revision: project.revision + 1,
+    metadata: { ...project.course.metadata, direction },
+  };
+  const response = await fetch(`/api/v1/projects/${project.id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_revision: project.revision, course }),
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể lưu định hướng bài giảng.");
+  return response.json() as Promise<Project>;
+}
+
 export async function listProjectSources(projectId: string): Promise<SourceMaterial[]> {
   const response = await fetch(`/api/v1/projects/${projectId}/sources`, { credentials: "include" });
   if (!response.ok) throw new Error((await message(response)) || "Không thể tải học liệu của bài giảng.");

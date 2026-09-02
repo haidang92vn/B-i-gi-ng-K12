@@ -14,6 +14,7 @@ Included now:
 - a Step 1 title, source-text and source-file surface with explicit save/error state;
 - canonical draft creation, optimistic title revision updates and source persistence;
 - automatic restore of the latest active owned draft and its newest extracted source;
+- Step 2 direction selection persisted through an optimistic canonical revision update;
 - a same-origin `/api/*` rewrite to FastAPI.
 
 The browser never receives stored teacher AI credentials. `course.json` remains canonical and no
@@ -64,6 +65,10 @@ Step 1 now reuses the open project instead of creating a new record for each sav
 stored as a UTF-8 source material version; uploaded TXT/PDF/DOCX/PPTX files remain in the configured
 object storage, while the frontend restores extracted text through the authenticated API.
 
-The next slice implements Step 2 direction selection. Acceptance requires the selected lesson,
-review or advanced direction to persist through an optimistic canonical revision update and remain
-selected after refresh without changing Step 1 source history.
+Step 2 now offers lesson, review and advanced directions. Saving changes only
+`course.metadata.direction` and `course.revision`; it preserves title, source history and all other
+canonical fields. A revision conflict is shown instead of silently overwriting another session.
+
+The next slice implements Step 3 AI generation. Acceptance requires provider/credential selection,
+generation from the newest saved source and populating the same project id instead of creating a
+duplicate lesson. Provider errors and invalid structured output must remain recoverable.

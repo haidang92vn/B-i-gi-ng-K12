@@ -169,8 +169,9 @@ Acceptance:
 - [x] Provide a responsive shell in which the existing eight-step teacher workflow remains recognizable.
 - [x] Add the Step 1 source/title surface with explicit save state.
 - [x] Connect Step 1 to canonical draft creation and source upload, then verify refresh/reopen behavior.
-- [ ] Migrate Step 2 direction selection and persist it through optimistic canonical revision updates.
-- [ ] Migrate Steps 2–8 incrementally; remove a prototype screen only after its replacement passes acceptance tests.
+- [x] Migrate Step 2 direction selection and persist it through optimistic canonical revision updates.
+- [ ] Migrate Step 3 AI provider/credential selection and populate the same canonical draft.
+- [ ] Migrate Steps 3–8 incrementally; remove a prototype screen only after its replacement passes acceptance tests.
 
 Acceptance for this first slice:
 - Next.js production build and strict TypeScript check pass;

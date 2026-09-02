@@ -8,11 +8,13 @@ import {
   listProjects,
   listProjectSources,
   signOut,
+  updateProjectDirection,
   updateProjectTitle,
   uploadProjectSource,
   type Project,
   type SourceMaterial,
   type Teacher,
+  type WorkflowDirection,
 } from "@/lib/api";
 import { initialCourseDraft, type CourseDraft } from "@/lib/course";
 
@@ -28,6 +30,17 @@ const steps = [
   ["Cấu hình SCORM", "K12Online • SCORM 2004"],
   ["Kiểm tra & xuất", "ZIP sẵn sàng upload"],
 ] as const;
+
+const directionOptions: Array<{
+  id: WorkflowDirection;
+  title: string;
+  summary: string;
+  outcome: string;
+}> = [
+  { id: "lesson", title: "Bài học mới", summary: "Giải thích kiến thức theo tiến trình rõ ràng, có ví dụ và luyện tập.", outcome: "Mục tiêu → kiến thức → ví dụ → luyện tập" },
+  { id: "review", title: "Ôn tập – củng cố", summary: "Hệ thống hóa nội dung đã học và ưu tiên câu hỏi kiểm tra nhanh.", outcome: "Tóm tắt → ghi nhớ → luyện tập → phản hồi" },
+  { id: "advanced", title: "Nâng cao – mở rộng", summary: "Tạo tình huống vận dụng, so sánh và câu hỏi tư duy ở mức cao hơn.", outcome: "Khám phá → vận dụng → thử thách → mở rộng" },
+];
 
 function AuthGate({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) => void }) {
   const [email, setEmail] = useState("");
@@ -80,6 +93,7 @@ export default function Home() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saveState, setSaveState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa lưu" });
+  const [directionState, setDirectionState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa chọn" });
 
   useEffect(() => {
     currentTeacher().then(setTeacher).catch(() => setTeacher(null));
@@ -105,6 +119,7 @@ export default function Home() {
         });
         setSourceDirty(false);
         setSaveState({ tone: "saved", message: `Đã khôi phục • bản ${latest.revision}` });
+        setDirectionState({ tone: "saved", message: "Đã lưu trong course.json" });
       })
       .catch((reason) => {
         if (!cancelled) setSaveState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể mở bản nháp gần nhất." });
@@ -188,6 +203,48 @@ export default function Home() {
     }
   }
 
+  async function saveDirection(): Promise<boolean> {
+    if (busy) return false;
+    if (!project) {
+      setSaveState({ tone: "error", message: "Cần lưu nguồn bài học trước." });
+      setActiveStep(1);
+      return false;
+    }
+    if (project.course.metadata.direction === draft.direction) {
+      setDirectionState({ tone: "saved", message: "Đã lưu trong course.json" });
+      return true;
+    }
+    setBusy(true);
+    setDirectionState({ tone: "loading", message: "Đang lưu định hướng…" });
+    try {
+      const updated = await updateProjectDirection(project, draft.direction);
+      setProject(updated);
+      setDirectionState({ tone: "saved", message: `Đã lưu • bản ${updated.revision}` });
+      return true;
+    } catch (reason) {
+      setDirectionState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể lưu định hướng." });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function navigateToStep(number: number) {
+    if (number > 1 && activeStep === 1 && !(await saveDraft())) return;
+    if (number > 2 && activeStep === 1) {
+      setActiveStep(2);
+      return;
+    }
+    if (number > 2 && activeStep === 2 && !(await saveDirection())) return;
+    setActiveStep(number);
+  }
+
+  async function advance() {
+    if (activeStep === 1 && !(await saveDraft())) return;
+    if (activeStep === 2 && !(await saveDirection())) return;
+    setActiveStep((value) => Math.min(8, value + 1));
+  }
+
   function startNewDraft() {
     if (busy) return;
     setProject(null);
@@ -195,6 +252,7 @@ export default function Home() {
     setDraft(initialCourseDraft);
     setSourceDirty(false);
     setSaveState({ tone: "idle", message: "Bài mới chưa lưu" });
+    setDirectionState({ tone: "idle", message: "Chưa chọn" });
     setActiveStep(1);
   }
 
@@ -207,6 +265,7 @@ export default function Home() {
     setProject(null);
     setSources([]);
     setDraft(initialCourseDraft);
+    setDirectionState({ tone: "idle", message: "Chưa chọn" });
   }
 
   return (
@@ -216,7 +275,7 @@ export default function Home() {
         <nav aria-label="Quy trình soạn bài">
           {steps.map(([title, detail], index) => {
             const number = index + 1;
-            return <button key={title} className={number === activeStep ? "step active" : number < activeStep ? "step done" : "step"} onClick={() => setActiveStep(number)}><b>{number < activeStep ? "✓" : number}</b><span><strong>{title}</strong><small>{detail}</small></span></button>;
+            return <button key={title} className={number === activeStep ? "step active" : number < activeStep ? "step done" : "step"} onClick={() => { void navigateToStep(number); }}><b>{number < activeStep ? "✓" : number}</b><span><strong>{title}</strong><small>{detail}</small></span></button>;
           })}
         </nav>
         <div className="sidebar-note"><strong>Nguyên tắc</strong><p>AI tạo nháp. Giáo viên duyệt. Hệ thống mới đóng gói SCORM.</p></div>
@@ -244,12 +303,40 @@ export default function Home() {
                 <div className="save-row"><p>Dữ liệu chỉ được xem là đã lưu khi máy chủ xác nhận.</p><button className="primary" disabled={busy || workspaceLoading}>{busy ? "Đang lưu…" : project ? "Lưu thay đổi" : "Tạo bản nháp"}</button></div>
               </form>
             </>
+          ) : activeStep === 2 ? (
+            <>
+              <div className="section-heading">
+                <div><span className="task-label">TASK 02</span><h2>Chọn định hướng bài giảng</h2><p>Định hướng quyết định cấu trúc mà AI sẽ dùng ở bước tiếp theo.</p></div>
+                <span className={`status-pill ${directionState.tone}`} role="status">{directionState.message}</span>
+              </div>
+              <form className="direction-form" onSubmit={(event) => { event.preventDefault(); void saveDirection(); }}>
+                <fieldset disabled={busy || workspaceLoading}>
+                  <legend>Chọn một định hướng phù hợp với mục tiêu tiết dạy</legend>
+                  <div className="direction-grid">
+                    {directionOptions.map((option, index) => (
+                      <label className={draft.direction === option.id ? "direction-card selected" : "direction-card"} key={option.id}>
+                        <input type="radio" name="direction" value={option.id} checked={draft.direction === option.id} onChange={() => { setDraft((value) => ({ ...value, direction: option.id })); setDirectionState({ tone: "idle", message: "Có thay đổi chưa lưu" }); }} />
+                        <span className="direction-number">{String(index + 1).padStart(2, "0")}</span>
+                        <strong>{option.title}</strong>
+                        <p>{option.summary}</p>
+                        <small>{option.outcome}</small>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <div className="direction-summary">
+                  <div><span>Định hướng đang chọn</span><strong>{directionOptions.find((option) => option.id === draft.direction)?.title}</strong></div>
+                  <p>Lựa chọn được lưu trong <code>course.json</code>; nội dung nguồn và các tệp đã tải ở Bước 1 không thay đổi.</p>
+                </div>
+                <div className="save-row"><p>Hệ thống dùng revision để ngăn hai phiên ghi đè lẫn nhau.</p><button className="primary" disabled={busy || workspaceLoading}>{busy ? "Đang lưu…" : "Lưu định hướng"}</button></div>
+              </form>
+            </>
           ) : (
             <div className="step-placeholder"><span>{String(activeStep).padStart(2, "0")}</span><h2>{steps[activeStep - 1][0]}</h2><p>Chức năng này tiếp tục dùng bản prototype ổn định và sẽ được chuyển sang TypeScript ở milestone kế tiếp.</p></div>
           )}
         </section>
 
-        <footer className="flow-footer"><button disabled={activeStep === 1} onClick={() => setActiveStep((value) => Math.max(1, value - 1))}>← Quay lại</button><span>Bước {activeStep}/8</span><button className="primary" disabled={busy || workspaceLoading} onClick={async () => { if (activeStep === 1 && !(await saveDraft())) return; setActiveStep((value) => Math.min(8, value + 1)); }}>{activeStep === 8 ? "Hoàn tất" : activeStep === 1 ? "Lưu & tiếp tục →" : "Tiếp tục →"}</button></footer>
+        <footer className="flow-footer"><button disabled={activeStep === 1} onClick={() => setActiveStep((value) => Math.max(1, value - 1))}>← Quay lại</button><span>Bước {activeStep}/8</span><button className="primary" disabled={busy || workspaceLoading} onClick={() => { void advance(); }}>{activeStep === 8 ? "Hoàn tất" : activeStep <= 2 ? "Lưu & tiếp tục →" : "Tiếp tục →"}</button></footer>
       </main>
     </div>
   );

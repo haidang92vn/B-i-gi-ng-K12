@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createProject, updateProjectTitle, uploadProjectSource, type Project } from "./api";
+import { createProject, updateProjectDirection, updateProjectTitle, uploadProjectSource, type Project } from "./api";
 
 const project: Project = {
   id: "course-1",
@@ -19,7 +19,7 @@ const project: Project = {
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("Step 1 project API", () => {
+describe("Canonical project API", () => {
   it("creates one canonical draft with the selected direction", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(project), { status: 201 }));
 
@@ -44,6 +44,20 @@ describe("Step 1 project API", () => {
     expect(body.course.id).toBe("course-1");
     expect(body.course.revision).toBe(4);
     expect(body.course.metadata.title).toBe("Bài mới");
+  });
+
+  it("persists direction with an optimistic canonical revision", async () => {
+    const updated = { ...project, revision: 4, course: { ...project.course, revision: 4, metadata: { ...project.course.metadata, direction: "advanced" } } };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(updated), { status: 200 }));
+
+    await updateProjectDirection(project, "advanced");
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(String(request.body));
+    expect(body.expected_revision).toBe(3);
+    expect(body.course.revision).toBe(4);
+    expect(body.course.metadata.direction).toBe("advanced");
+    expect(body.course.metadata.title).toBe("Bài cũ");
   });
 
   it("uploads source bytes as multipart data without setting a content-type header", async () => {

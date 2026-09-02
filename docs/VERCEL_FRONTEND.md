@@ -11,7 +11,9 @@ The temporary frontend URL is
 `https://frontend-vert-nine-24.vercel.app`. It is suitable for reviewing the
 interface and for configuring an exact Google OAuth callback later. It does not
 make login, AI generation, uploads or SCORM export available until a public VPS
-API is configured.
+API is configured. The login screen explicitly detects this missing backend and
+explains that it is an interface-only deployment instead of presenting a
+misleading authentication failure.
 
 The current upload deployment is deliberately a manual Vercel deployment. Link
 the GitHub repository to the Vercel project after the repository selector refreshes,

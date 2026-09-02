@@ -7,6 +7,7 @@ import LmsSettingsEditor from "@/app/lms-settings";
 import PlayerStudio from "@/app/player-studio";
 import QuizEditor from "@/app/quiz-editor";
 import {
+  ApiUnavailableError,
   authenticate,
   createProject,
   currentTeacher,
@@ -59,11 +60,12 @@ const providerOptions: Array<{ id: AIProvider; title: string; badge: string; sum
   { id: "gemini", title: "Google Gemini", badge: "API cá nhân", summary: "Dùng khóa Gemini đã được mã hóa và lưu ở phía máy chủ." },
 ];
 
-function AuthGate({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) => void }) {
+function AuthGate({ onAuthenticated, backendMessage }: { onAuthenticated: (teacher: Teacher) => void; backendMessage: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const backendUnavailable = Boolean(backendMessage);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -86,15 +88,15 @@ function AuthGate({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) => 
         <p className="eyebrow">TRƯỜNG TIỂU HỌC TRẦN QUỐC TOẢN</p>
         <h1 id="auth-title">AI SCORM Studio</h1>
         <p className="muted">Đăng nhập để tiếp tục soạn, duyệt và xuất bài giảng SCORM.</p>
-        <a className="google-button" href="/api/v1/auth/google/start">Đăng nhập với Google</a>
+        {backendUnavailable ? <p className="backend-notice" role="alert"><strong>Chưa kết nối dịch vụ tạo bài.</strong>{backendMessage}<span>Bản web này chỉ đang hiển thị giao diện; đăng nhập, AI và xuất ZIP cần FastAPI phía máy chủ.</span></p> : <a className="google-button" href="/api/v1/auth/google/start">Đăng nhập với Google</a>}
         <div className="divider"><span>hoặc dùng email</span></div>
         <form onSubmit={submit}>
-          <label>Email<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="giaovien@truong.edu.vn" /></label>
-          <label>Mật khẩu<input type="password" autoComplete="current-password" required minLength={12} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+          <label>Email<input type="email" autoComplete="email" required disabled={backendUnavailable} value={email} onChange={(event) => setEmail(event.target.value)} placeholder="giaovien@truong.edu.vn" /></label>
+          <label>Mật khẩu<input type="password" autoComplete="current-password" required minLength={12} disabled={backendUnavailable} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
           {error && <p className="form-error" role="alert">{error}</p>}
-          <button className="primary" disabled={busy}>{busy ? "Đang xác thực…" : "Đăng nhập / Tạo tài khoản"}</button>
+          <button className="primary" disabled={busy || backendUnavailable}>{busy ? "Đang xác thực…" : "Đăng nhập / Tạo tài khoản"}</button>
         </form>
-        <small>Tài khoản mới sẽ được tạo tự động khi email chưa đăng ký.</small>
+        <small>{backendUnavailable ? "Bản local có backend tại http://127.0.0.1:3000 khi máy chủ đang chạy." : "Tài khoản mới sẽ được tạo tự động khi email chưa đăng ký."}</small>
       </section>
     </main>
   );
@@ -102,6 +104,7 @@ function AuthGate({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) => 
 
 export default function Home() {
   const [teacher, setTeacher] = useState<Teacher | null | undefined>(undefined);
+  const [backendMessage, setBackendMessage] = useState("");
   const [activeStep, setActiveStep] = useState(1);
   const [draft, setDraft] = useState<CourseDraft>(initialCourseDraft);
   const [project, setProject] = useState<Project | null>(null);
@@ -127,7 +130,15 @@ export default function Home() {
   const [exportState, setExportState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Sẵn sàng kiểm tra và xuất" });
 
   useEffect(() => {
-    currentTeacher().then(setTeacher).catch(() => setTeacher(null));
+    currentTeacher()
+      .then((nextTeacher) => {
+        setBackendMessage("");
+        setTeacher(nextTeacher);
+      })
+      .catch((reason) => {
+        setBackendMessage(reason instanceof ApiUnavailableError ? reason.message : "Không thể xác nhận kết nối với dịch vụ tạo bài giảng.");
+        setTeacher(null);
+      });
   }, []);
 
   useEffect(() => {
@@ -443,7 +454,7 @@ export default function Home() {
   }
 
   if (teacher === undefined) return <main className="loading-page"><div className="loading-mark">S</div><p>Đang mở không gian soạn bài…</p></main>;
-  if (teacher === null) return <AuthGate onAuthenticated={setTeacher} />;
+  if (teacher === null) return <AuthGate onAuthenticated={setTeacher} backendMessage={backendMessage} />;
 
   async function logout() {
     await signOut();

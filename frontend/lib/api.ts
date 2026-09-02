@@ -190,6 +190,19 @@ export type GenerationResponse = {
   };
 };
 
+export class ApiUnavailableError extends Error {
+  constructor() {
+    super("Dịch vụ tạo bài giảng hiện chưa kết nối. Hãy dùng bản local hoặc liên hệ quản trị viên để cấu hình backend.");
+    this.name = "ApiUnavailableError";
+  }
+}
+
+function apiIsUnavailable(response: Response) {
+  // `/api/v1/me` is a stable route. A 404 here means the Vercel frontend was
+  // deployed without its FastAPI rewrite, rather than an authentication error.
+  return response.status === 404 || response.status >= 500;
+}
+
 async function message(response: Response) {
   try {
     const body = (await response.json()) as { detail?: string | { message?: string; errors?: string[] } };
@@ -207,8 +220,14 @@ export function filenameFromContentDisposition(header: string | null, fallback =
 }
 
 export async function currentTeacher(): Promise<Teacher | null> {
-  const response = await fetch("/api/v1/me", { credentials: "include" });
+  let response: Response;
+  try {
+    response = await fetch("/api/v1/me", { credentials: "include" });
+  } catch {
+    throw new ApiUnavailableError();
+  }
   if (response.status === 401) return null;
+  if (apiIsUnavailable(response)) throw new ApiUnavailableError();
   if (!response.ok) throw new Error((await message(response)) || "Không thể kết nối máy chủ.");
   return response.json() as Promise<Teacher>;
 }

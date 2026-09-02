@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   addProjectMediaUrl,
+  ApiUnavailableError,
   attachProjectMedia,
   createProject,
+  currentTeacher,
   exportScorm,
   filenameFromContentDisposition,
   generateSlideTTS,
@@ -40,6 +42,12 @@ const project: Project = {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Canonical project API", () => {
+  it("identifies a frontend deployed without its backend instead of treating it as a login failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("Not Found", { status: 404 }));
+
+    await expect(currentTeacher()).rejects.toBeInstanceOf(ApiUnavailableError);
+  });
+
   it("creates one canonical draft with the selected direction", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(project), { status: 201 }));
 

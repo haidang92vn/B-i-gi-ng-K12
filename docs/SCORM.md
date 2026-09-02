@@ -45,6 +45,10 @@ The exact policy must be stored in the course model, not hard-coded in player JS
 ## Resume
 Persist the learner position and compact player state. Use `cmi.location` for current location and `cmi.suspend_data` for additional state.
 
+The player stores `location` and `highestVisited` in suspend data. Completion
+and success are independent: a required quiz must be submitted before viewed
+progress can complete the course, while success is determined only by score.
+
 ## Validator
 Before export is downloadable, validate at least:
 - manifest exists and is parseable XML

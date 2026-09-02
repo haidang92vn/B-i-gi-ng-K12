@@ -97,11 +97,25 @@ class CourseContractTests(unittest.TestCase):
         self.assertEqual(api.GetValue("cmi.success_status"), "passed")
         self.assertEqual(api.GetValue("cmi.completion_status"), "incomplete")
         runtime.view_slide(location=9, total_slides=10)
-        self.assertEqual(runtime.resume(), {"location": 9})
+        self.assertEqual(runtime.resume(), {"location": 9, "highestVisited": 9})
         self.assertEqual(api.GetValue("cmi.completion_status"), "completed")
         runtime.finish(61)
         self.assertEqual(api.GetValue("cmi.session_time"), "PT0H1M1S")
         self.assertTrue(api.terminated)
+
+    def test_scorm_runtime_requires_quiz_and_handles_bad_resume_data(self):
+        api = FakeScorm2004API(values={"cmi.suspend_data": "not-json"})
+        runtime = ScormRuntime(api, completion_percent=90, passing_score=70, require_quiz=True)
+        runtime.initialize()
+        self.assertEqual(runtime.resume(), {})
+        runtime.view_slide(location=9, total_slides=10)
+        self.assertEqual(api.GetValue("cmi.completion_status"), "incomplete")
+        runtime.submit_score(65)
+        self.assertEqual(api.GetValue("cmi.success_status"), "failed")
+        self.assertEqual(api.GetValue("cmi.completion_status"), "completed")
+        self.assertEqual(runtime.resume(), {"location": 9, "highestVisited": 9})
+        runtime.finish(-10)
+        self.assertEqual(api.GetValue("cmi.session_time"), "PT0H0M0S")
 
     def test_quality_checker_identifies_fixable_slide_and_question_issues(self):
         course = new_course("Kiểm tra chất lượng")

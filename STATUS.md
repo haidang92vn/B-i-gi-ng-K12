@@ -42,6 +42,6 @@ architecture. It is **not yet the production application**.
 - Full quiz renderers for matching/ordering/drag-drop/image interactions.
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
 - A production Next.js frontend and actual background-job handlers (the current Compose worker only validates Redis connectivity).
-- Analytics.
+- Analytics dashboard/importer. Public K12Online documentation confirms report export but does not expose a public analytics API/webhook contract; see `docs/K12ONLINE_ANALYTICS_DISCOVERY.md`.
 
 Follow `TASKS.md` and the numbered files in `prompts/` to implement these in order.

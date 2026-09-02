@@ -141,3 +141,9 @@ Acceptance:
 - [x] school/team accounts.
 - [x] shared question library.
 - [ ] analytics.
+
+## Milestone 12.5 — K12Online analytics integration [P1]
+- [x] Verify public K12Online data channels: report export is documented; no public analytics API/webhook contract found.
+- [ ] Obtain de-identified export samples and field dictionary from the school/partner administrator.
+- [ ] Implement report-import adapter, normalized analytics storage and dashboard.
+- [ ] Add API/webhook adapter only when K12Online/Viettel supplies an approved specification.

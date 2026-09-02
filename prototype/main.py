@@ -922,8 +922,12 @@ class ExportRequest(BaseModel):
     resume: bool = True
     navigation_mode: Literal["free", "sequential", "restricted"] = "free"
     show_menu: bool = True
+    show_progress: bool = True
     primary_color: str | None = None
     require_quiz: bool = True
+    track_score: bool = True
+    track_completion: bool = True
+    track_success: bool = True
     project_id: str | None = None
     media_by_id: dict[str, dict[str, str]] = Field(default_factory=dict)
 
@@ -1680,10 +1684,12 @@ function scormInit(){
   if (!API) return false;
   try {
     runtimeAdapter.initialize();
-    const status = runtimeAdapter.get("cmi.completion_status");
-    if (!status || status === "unknown" || status === "not attempted") {
-      runtimeAdapter.set("cmi.completion_status","incomplete");
-      runtimeAdapter.commit();
+    if (typeof CFG === "undefined" || CFG.trackCompletion) {
+      const status = runtimeAdapter.get("cmi.completion_status");
+      if (!status || status === "unknown" || status === "not attempted") {
+        runtimeAdapter.set("cmi.completion_status","incomplete");
+        runtimeAdapter.commit();
+      }
     }
     sessionStartedAt = Date.now();
     return true;
@@ -1714,7 +1720,10 @@ def export_request_from_course(course: Course, media_by_id: dict[str, dict[str, 
                           settings=item.settings) for item in course.question_bank],
         passing_score=course.completion.passing_score, completion_percent=course.completion.viewed_percent,
         resume=course.scorm.resume, navigation_mode=course.navigation.mode,
-        show_menu=course.navigation.show_menu, primary_color=course.theme.primary_color, require_quiz=course.completion.require_quiz,
+        show_menu=course.navigation.show_menu, show_progress=course.navigation.show_progress,
+        primary_color=course.theme.primary_color, require_quiz=course.completion.require_quiz,
+        track_score=course.scorm.track_score, track_completion=course.scorm.track_completion,
+        track_success=course.scorm.track_success,
         media_by_id=media_by_id,
     )
 
@@ -1828,7 +1837,9 @@ def build_course_html(req: ExportRequest):
         "quizCount": len(selected),
         "passing": req.passing_score,
         "completion": req.completion_percent,
-        "resume": req.resume, "navigationMode": req.navigation_mode, "showMenu": req.show_menu, "requireQuiz": req.require_quiz
+        "resume": req.resume, "navigationMode": req.navigation_mode, "showMenu": req.show_menu,
+        "showProgress": req.show_progress, "requireQuiz": req.require_quiz,
+        "trackScore": req.track_score, "trackCompletion": req.track_completion, "trackSuccess": req.track_success
     }
     answers = {q.id: q.answer for q in selected}
 
@@ -1899,8 +1910,7 @@ function show(i){{
   scormSet("cmi.location", current);
   scormSuspend({{location:current,highestVisited}});
   const progress = Math.round(((current+1)/slides.length)*100);
-  scormSet("cmi.progress_measure", progress/100);
-  updateCompletion(progress);
+  if(CFG.trackCompletion){{scormSet("cmi.progress_measure", progress/100);updateCompletion(progress);}}
   renderMenu();
 }}
 function go(delta){{ show(current+delta); }}
@@ -1911,7 +1921,7 @@ function renderMenu(){{
   menu.innerHTML=slides.map((slide,index)=>`<button class="${{index===current?"active":""}}" ${{index>highestVisited&&CFG.navigationMode!=="free"?"disabled":""}} onclick="show(${{index}})">Slide ${{index+1}}</button>`).join("");
 }}
 function toggleFullscreen(){{if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();else document.exitFullscreen?.();}}
-function updateCompletion(progress){{if(progress >= CFG.completion && (!CFG.requireQuiz || quizSubmitted))scormSet("cmi.completion_status","completed");}}
+function updateCompletion(progress){{if(CFG.trackCompletion && progress >= CFG.completion && (!CFG.requireQuiz || quizSubmitted))scormSet("cmi.completion_status","completed");}}
 let draggingToken=null;
 document.addEventListener("dragstart",event=>{{if(event.target.classList.contains("drag-token"))draggingToken=event.target;}});
 document.addEventListener("dragover",event=>{{const zone=event.target.closest(".drop-zone");if(zone){{event.preventDefault();zone.classList.add("drag-over");}}}});
@@ -1944,11 +1954,13 @@ function submitQuiz(){{
     if(sameAnswer(type,value,answer)) correct++;
   }});
   const score = questions.length ? Math.round(correct/questions.length*100) : 100;
-  scormSet("cmi.score.raw", score);
-  scormSet("cmi.score.min", 0);
-  scormSet("cmi.score.max", 100);
-  scormSet("cmi.score.scaled", score/100);
-  scormSet("cmi.success_status", score >= CFG.passing ? "passed" : "failed");
+  if(CFG.trackScore){{
+    scormSet("cmi.score.raw", score);
+    scormSet("cmi.score.min", 0);
+    scormSet("cmi.score.max", 100);
+    scormSet("cmi.score.scaled", score/100);
+  }}
+  if(CFG.trackSuccess)scormSet("cmi.success_status", score >= CFG.passing ? "passed" : "failed");
   quizSubmitted = true;
   updateCompletion(Math.round(((current+1)/slides.length)*100));
   document.getElementById("quizResult").textContent =
@@ -2000,7 +2012,6 @@ def export_scorm(req: ExportRequest, user: User = Depends(current_teacher), db: 
         if unresolved_image_assets:
             raise HTTPException(status_code=422, detail={"code": "QUIZ_IMAGE_ASSET_MISSING", "message": "Một hoặc nhiều ảnh lựa chọn chưa có asset ảnh hợp lệ.", "asset_ids": unresolved_image_assets})
         effective = export_request_from_course(course, media_by_id)
-        effective.passing_score, effective.completion_percent, effective.resume = req.passing_score, req.completion_percent, req.resume
         effective.project_id = project.id
         files["imsmanifest.xml"] = scorm_manifest(effective.title, asset_paths).encode()
     else:

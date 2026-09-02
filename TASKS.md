@@ -107,6 +107,7 @@ Acceptance:
 - [x] Resume with location/suspend data.
 - [x] Score/completion/success/session time tracking.
 - [x] Runtime unit/integration test harness.
+- [x] Next.js Step 7 canonical K12Online/SCORM configuration.
 
 Acceptance:
 - resume works in a SCORM test environment;

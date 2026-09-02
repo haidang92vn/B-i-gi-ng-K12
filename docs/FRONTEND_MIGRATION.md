@@ -24,6 +24,8 @@ Included now:
 - Step 6 authenticated HTML5 player preview rendered by the existing backend;
 - per-slide AI image/TTS preview, validated upload and approved HTTPS URL media workflows;
 - explicit media attachment that stores only an `asset_id` reference in the canonical slide;
+- Step 7 K12Online/custom preset, navigation, completion and SCORM tracking configuration;
+- a live player refresh after canonical LMS settings are acknowledged by the backend;
 - a same-origin `/api/*` rewrite to FastAPI.
 
 The browser never receives stored teacher AI credentials. `course.json` remains canonical and no
@@ -113,6 +115,14 @@ frontend performs early type/size checks and the backend remains authoritative f
 rights, ownership and URL safety. Viewers can use the player and inspect attached media but cannot
 create or attach assets.
 
-The next slice implements Step 7 LMS/SCORM settings in Next.js. It will edit canonical navigation,
-completion and SCORM 2004/K12Online preset fields through the existing optimistic revision guard,
-then refresh the same player preview without claiming live LMS compatibility.
+Step 7 edits canonical navigation, completion and SCORM fields through the same 700 ms optimistic
+autosave guard. Choosing K12Online restores the documented 90% viewed, 70% passing, required quiz,
+resume and full tracking defaults; changing an individual value marks the configuration custom.
+The backend player now honors `show_progress`, `track_score`, `track_completion` and
+`track_success`, and project export takes these settings only from saved `course.json`. The screen
+shows non-blocking logic warnings and the manual tenant-test disclaimer; static validation is not
+presented as proof of K12Online interoperability.
+
+The next slice implements Step 8 quality check, SCORM validation, export history and ZIP download
+in Next.js. It must keep packaging on the backend, reject invalid packages before download and
+retain the documented manual K12Online verification gate.

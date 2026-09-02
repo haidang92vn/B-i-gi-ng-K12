@@ -6,6 +6,8 @@ và SCORM ZIP.
 - Điều hướng `free`, `sequential`, `restricted` được áp dụng khi chuyển slide
   và chọn từ menu.
 - `show_menu` ẩn/hiện menu; `show_progress` ẩn/hiện thanh tiến độ.
+- `track_score`, `track_completion`, `track_success` lần lượt điều khiển việc gửi
+  điểm, tiến độ/trạng thái hoàn thành và trạng thái đạt/chưa đạt về LMS.
 - Nếu `completion.require_quiz` bật, việc xem đủ tỷ lệ slide chưa đánh dấu hoàn
   thành cho tới khi học sinh nộp quiz. Trạng thái thành công vẫn dựa riêng vào
   điểm đạt.

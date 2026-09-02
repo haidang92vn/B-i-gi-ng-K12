@@ -28,6 +28,8 @@ export type CourseSlide = {
 
 export type QuestionType = "single" | "multiple" | "truefalse" | "fill" | "matching" | "ordering" | "dragdrop" | "image";
 export type QuestionDifficulty = "recognize" | "understand" | "apply" | "advanced";
+export type NavigationMode = "free" | "sequential" | "restricted";
+export type ScormPreset = "k12online" | "custom";
 
 export type CourseQuestion = {
   id: string;
@@ -63,7 +65,7 @@ export type CanonicalCourse = {
     logo_asset_id?: string | null;
   };
   navigation?: {
-    mode: "free" | "sequential" | "restricted";
+    mode: NavigationMode;
     show_menu: boolean;
     show_progress: boolean;
   };
@@ -71,6 +73,15 @@ export type CanonicalCourse = {
     viewed_percent: number;
     passing_score: number;
     require_quiz: boolean;
+  };
+  scorm?: {
+    standard: "SCORM_2004";
+    edition?: string | null;
+    preset: ScormPreset;
+    resume: boolean;
+    track_score: boolean;
+    track_completion: boolean;
+    track_success: boolean;
   };
   [key: string]: unknown;
 };

@@ -139,6 +139,11 @@ workflow: AI image/TTS drafts, validated teacher uploads, approved public HTTPS 
 explicit attachment. Attaching advances the canonical revision and stores only the asset reference;
 generated HTML remains transient output.
 
+The Next.js Step 7 screen saves navigation, completion and SCORM runtime switches into the same
+canonical course. K12Online restores the documented defaults; individual changes become a custom
+preset. Player preview and project export now use these saved values, including progress visibility
+and independent score/completion/success tracking.
+
 ## Milestone 11: production deployment
 
 The repository now includes `docker-compose.yml`, Caddy HTTPS configuration, explicit Alembic

@@ -42,12 +42,18 @@ Example preset:
 
 The exact policy must be stored in the course model, not hard-coded in player JS.
 
+The Next.js Step 7 editor persists this policy through the canonical project revision. When a
+project is exported, request-body defaults must not override its saved completion, navigation,
+resume or tracking settings.
+
 ## Resume
 Persist the learner position and compact player state. Use `cmi.location` for current location and `cmi.suspend_data` for additional state.
 
 The player stores `location` and `highestVisited` in suspend data. Completion
 and success are independent: a required quiz must be submitted before viewed
 progress can complete the course, while success is determined only by score.
+The canonical `track_score`, `track_completion` and `track_success` switches independently control
+whether the corresponding CMI values are sent; session time remains part of the runtime lifecycle.
 
 ## Validator
 Before export is downloadable, validate at least:

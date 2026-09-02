@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import CourseEditor from "@/app/course-editor";
+import LmsSettingsEditor from "@/app/lms-settings";
 import PlayerStudio from "@/app/player-studio";
 import QuizEditor from "@/app/quiz-editor";
 import {
@@ -120,6 +121,8 @@ export default function Home() {
   const [quizState, setQuizState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa chọn quiz" });
   const [quizSaved, setQuizSaved] = useState(true);
   const [playerState, setPlayerState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa dựng player" });
+  const [scormState, setScormState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa cấu hình" });
+  const [scormSaved, setScormSaved] = useState(true);
 
   useEffect(() => {
     currentTeacher().then(setTeacher).catch(() => setTeacher(null));
@@ -153,6 +156,8 @@ export default function Home() {
           setReviewSaved(true);
           setQuizState({ tone: "saved", message: `${latest.course.question_bank.filter((question) => question.selected).length} câu đang chọn` });
           setPlayerState({ tone: "saved", message: `Player canonical • bản ${latest.revision}` });
+          setScormState({ tone: "saved", message: `${latest.course.scorm?.preset === "custom" ? "Tùy chỉnh" : "K12Online"} • bản ${latest.revision}` });
+          setScormSaved(true);
           setQuizSaved(true);
         }
       })
@@ -333,6 +338,8 @@ export default function Home() {
       setQuizState({ tone: "saved", message: `${updated.course.question_bank.filter((question) => question.selected).length} câu đang chọn` });
       setQuizSaved(true);
       setPlayerState({ tone: "saved", message: `Sẵn sàng dựng • bản ${updated.revision}` });
+      setScormState({ tone: "saved", message: `K12Online • bản ${updated.revision}` });
+      setScormSaved(true);
       return true;
     } catch (reason) {
       setGenerationState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể tạo nội dung bằng AI." });
@@ -349,6 +356,10 @@ export default function Home() {
     }
     if (activeStep === 5 && number !== 5 && !quizSaved) {
       setQuizState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi rời Bước 5." });
+      return;
+    }
+    if (activeStep === 7 && number !== 7 && !scormSaved) {
+      setScormState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi rời Bước 7." });
       return;
     }
     if (number > 1 && activeStep === 1 && !(await saveDraft())) return;
@@ -377,6 +388,10 @@ export default function Home() {
       setActiveStep(6);
       return;
     }
+    if (number > 7 && activeStep === 6) {
+      setActiveStep(7);
+      return;
+    }
     setActiveStep(number);
   }
 
@@ -393,6 +408,10 @@ export default function Home() {
     }
     if (activeStep === 5 && !quizSaved) {
       setQuizState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi tiếp tục." });
+      return;
+    }
+    if (activeStep === 7 && !scormSaved) {
+      setScormState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi tiếp tục." });
       return;
     }
     setActiveStep((value) => Math.min(8, value + 1));
@@ -413,6 +432,8 @@ export default function Home() {
     setQuizState({ tone: "idle", message: "Chưa chọn quiz" });
     setQuizSaved(true);
     setPlayerState({ tone: "idle", message: "Chưa dựng player" });
+    setScormState({ tone: "idle", message: "Chưa cấu hình" });
+    setScormSaved(true);
     setActiveStep(1);
   }
 
@@ -436,6 +457,8 @@ export default function Home() {
     setQuizState({ tone: "idle", message: "Chưa chọn quiz" });
     setQuizSaved(true);
     setPlayerState({ tone: "idle", message: "Chưa dựng player" });
+    setScormState({ tone: "idle", message: "Chưa cấu hình" });
+    setScormSaved(true);
   }
 
   return (
@@ -601,12 +624,25 @@ export default function Home() {
                 onStatus={(tone, message) => setPlayerState({ tone, message })}
               />
             </>
+          ) : activeStep === 7 && project ? (
+            <>
+              <div className="section-heading">
+                <div><span className="task-label">TASK 07</span><h2>Cấu hình LMS / SCORM</h2><p>Áp preset K12Online hoặc điều chỉnh chính sách điều hướng, hoàn thành và tracking.</p></div>
+                <span className={`status-pill ${scormState.tone}`} role="status">{scormState.message}</span>
+              </div>
+              <LmsSettingsEditor
+                key={project.id}
+                project={project}
+                onProjectChange={setProject}
+                onSaveState={(tone, message, saved) => { setScormState({ tone, message }); setScormSaved(saved); }}
+              />
+            </>
           ) : (
             <div className="step-placeholder"><span>{String(activeStep).padStart(2, "0")}</span><h2>{steps[activeStep - 1][0]}</h2><p>Chức năng này tiếp tục dùng bản prototype ổn định và sẽ được chuyển sang TypeScript ở milestone kế tiếp.</p></div>
           )}
         </section>
 
-        <footer className="flow-footer"><button disabled={activeStep === 1} onClick={() => { void navigateToStep(Math.max(1, activeStep - 1)); }}>← Quay lại</button><span>Bước {activeStep}/8</span><button className="primary" disabled={busy || workspaceLoading || (activeStep === 4 && !reviewSaved) || (activeStep === 5 && !quizSaved)} onClick={() => { void advance(); }}>{activeStep === 8 ? "Hoàn tất" : activeStep <= 2 ? "Lưu & tiếp tục →" : "Tiếp tục →"}</button></footer>
+        <footer className="flow-footer"><button disabled={activeStep === 1} onClick={() => { void navigateToStep(Math.max(1, activeStep - 1)); }}>← Quay lại</button><span>Bước {activeStep}/8</span><button className="primary" disabled={busy || workspaceLoading || (activeStep === 4 && !reviewSaved) || (activeStep === 5 && !quizSaved) || (activeStep === 7 && !scormSaved)} onClick={() => { void advance(); }}>{activeStep === 8 ? "Hoàn tất" : activeStep <= 2 ? "Lưu & tiếp tục →" : "Tiếp tục →"}</button></footer>
       </main>
     </div>
   );

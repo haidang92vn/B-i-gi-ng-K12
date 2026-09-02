@@ -72,14 +72,41 @@ class CourseContractTests(unittest.TestCase):
         request = module.ExportRequest(
             title="Player policy", direction="lesson", objectives=[], sections=[{"title": "Một", "content": "Nội dung"}],
             quizzes=[module.QuizItem(id="match", question="Ghép các cặp tương ứng.", quiz_type="matching", answer={"A": "1", "B": "2"}, options=["1", "2"], selected=True), module.QuizItem(id="order", question="Sắp xếp đúng thứ tự.", quiz_type="ordering", answer=["Một", "Hai"], options=["Một", "Hai"], selected=True)],
-            navigation_mode="restricted", show_menu=False, require_quiz=True,
+            navigation_mode="restricted", show_menu=False, show_progress=False, require_quiz=True,
+            track_score=False, track_completion=False, track_success=False,
         )
         player = module.build_course_html(request)
         self.assertIn('data-match-left="A"', player)
         self.assertIn('data-type="ordering"', player)
         self.assertIn('document.querySelector(".progress").hidden = !CFG.showProgress', player)
+        self.assertIn('"showProgress": false', player)
+        self.assertIn('"trackScore": false', player)
+        self.assertIn('if(CFG.trackCompletion)', player)
+        self.assertIn('if(CFG.trackSuccess)', player)
         self.assertIn('(!CFG.requireQuiz || quizSubmitted)', player)
         self.assertIn('CFG.navigationMode === "restricted"', player)
+
+    def test_project_export_uses_canonical_lms_settings_instead_of_request_overrides(self):
+        module = load_prototype()
+        client = TestClient(module.app)
+        client.post("/api/v1/auth/register", json={"email": f"canonical-scorm-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        generated = client.post("/api/generate", json={"title": "Cấu hình canonical", "source": "Nguồn bài học.", "provider": "mock"}).json()
+        generated["course"]["completion"].update({"passing_score": 81, "viewed_percent": 76})
+        generated["course"]["scorm"].update({"resume": True, "track_score": False, "track_completion": True, "track_success": False})
+        generated["course"]["navigation"].update({"show_progress": False, "mode": "sequential"})
+        project = client.post("/api/v1/projects", json={"title": "Cấu hình canonical", "direction": "lesson", "course": generated["course"]}).json()
+
+        exported = client.post("/api/export-scorm", json={"title": "Giá trị form cũ", "direction": "lesson", "objectives": [], "sections": [], "quizzes": [], "passing_score": 5, "completion_percent": 6, "resume": False, "project_id": project["id"]})
+        self.assertEqual(exported.status_code, 200, exported.text)
+        with zipfile.ZipFile(io.BytesIO(exported.content)) as package:
+            player = package.read("index.html").decode()
+        self.assertIn('"passing": 81', player)
+        self.assertIn('"completion": 76', player)
+        self.assertIn('"resume": true', player)
+        self.assertIn('"navigationMode": "sequential"', player)
+        self.assertIn('"showProgress": false', player)
+        self.assertIn('"trackScore": false', player)
+        self.assertIn('"trackSuccess": false', player)
 
     def test_quality_checker_flags_incomplete_image_quiz(self):
         course = new_course("Ảnh thiếu asset")

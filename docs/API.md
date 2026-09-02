@@ -87,6 +87,23 @@ POST /api/v1/projects/{project_id}/quality-check
 
 Long operations may return a job id instead of blocking the request.
 
+## Media and text-to-speech
+
+```text
+GET  /api/v1/projects/{project_id}/media
+POST /api/v1/projects/{project_id}/media/upload?slide_id={slide_id}&rights_confirmed=true
+POST /api/v1/projects/{project_id}/media/url?slide_id={slide_id}
+POST /api/v1/projects/{project_id}/slides/{slide_id}/image
+POST /api/v1/projects/{project_id}/slides/{slide_id}/tts
+POST /api/v1/projects/{project_id}/slides/{slide_id}/media
+GET  /api/v1/media/{asset_id}/content
+```
+
+Create/upload endpoints return a draft asset URL for teacher preview. The final attach call takes
+`asset_id` and `expected_revision`, then writes a media `asset_id` reference into canonical
+`course.json`. Only users with project edit access can create or attach media; viewers can see
+already attached assets through player/export access.
+
 ## Preview / rendering
 ```text
 POST /api/v1/projects/{project_id}/preview

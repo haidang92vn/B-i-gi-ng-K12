@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
+import zipfile
 
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
@@ -115,6 +117,63 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["course_id"], project["course"]["id"])
         self.assertFalse(response.json()["blocking"])
+
+    def test_media_tts_preview_attaches_to_course_and_packages_in_scorm(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"media-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        generated = client.post("/api/generate", json={"title": "Bài media", "source": "Nguồn học liệu cho media.", "provider": "mock"}).json()
+        project = client.post("/api/v1/projects", json={"title": "Bài media", "direction": "lesson", "course": generated["course"]}).json()
+        slide_id = project["course"]["slides"][0]["id"]
+
+        preview = client.post(f"/api/v1/projects/{project['id']}/slides/{slide_id}/tts", json={"text": "Nội dung để nghe thử.", "provider": "mock"})
+        self.assertEqual(preview.status_code, 201, preview.text)
+        asset = preview.json()
+        self.assertEqual(asset["status"], "draft")
+        content = client.get(asset["content_url"])
+        self.assertEqual(content.status_code, 200, content.text)
+        self.assertTrue(content.content.startswith(b"RIFF"))
+
+        attached = client.post(f"/api/v1/projects/{project['id']}/slides/{slide_id}/media", json={"asset_id": asset["id"], "expected_revision": 1})
+        self.assertEqual(attached.status_code, 200, attached.text)
+        self.assertEqual(attached.json()["revision"], 2)
+        self.assertIn(asset["id"], {block.get("asset_id") for block in attached.json()["course"]["slides"][0]["blocks"]})
+        self.assertIn(asset["content_url"], client.get(f"/api/v1/projects/{project['id']}/player").text)
+
+        exported = client.post("/api/export-scorm", json={"title": "Bài media", "direction": "lesson", "objectives": [], "sections": [], "quizzes": [], "project_id": project["id"]})
+        self.assertEqual(exported.status_code, 200, exported.text)
+        with zipfile.ZipFile(io.BytesIO(exported.content)) as package:
+            names = set(package.namelist())
+            self.assertIn("imsmanifest.xml", names)
+            self.assertIn(f"assets/{asset['id']}.wav", names)
+            self.assertIn(f"assets/{asset['id']}.wav", package.read("imsmanifest.xml").decode())
+            self.assertIn(f"assets/{asset['id']}.wav", package.read("index.html").decode())
+
+    def test_media_upload_and_url_require_safe_type_and_rights_confirmation(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"media-check-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        generated = client.post("/api/generate", json={"title": "Bài kiểm media", "source": "Nguồn học liệu.", "provider": "mock"}).json()
+        project = client.post("/api/v1/projects", json={"title": "Bài kiểm media", "direction": "lesson", "course": generated["course"]}).json()
+        slide_id = project["course"]["slides"][0]["id"]
+        rejected = client.post(f"/api/v1/projects/{project['id']}/media/upload", params={"slide_id": slide_id, "rights_confirmed": "false"}, files={"upload": ("fake.png", b"not-a-png", "image/png")})
+        self.assertEqual(rejected.status_code, 422, rejected.text)
+        unsafe_url = client.post(f"/api/v1/projects/{project['id']}/media/url", params={"slide_id": slide_id}, json={"kind": "image", "url": "https://127.0.0.1/private.png", "label": "Nội bộ", "rights_confirmed": True})
+        self.assertEqual(unsafe_url.status_code, 422, unsafe_url.text)
+
+    def test_external_media_url_is_not_copied_into_scorm_zip(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"media-url-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        generated = client.post("/api/generate", json={"title": "Bài URL", "source": "Nguồn học liệu.", "provider": "mock"}).json()
+        project = client.post("/api/v1/projects", json={"title": "Bài URL", "direction": "lesson", "course": generated["course"]}).json()
+        slide_id = project["course"]["slides"][0]["id"]
+        asset = client.post(f"/api/v1/projects/{project['id']}/media/url", params={"slide_id": slide_id}, json={"kind": "image", "url": "https://media.example.test/lesson.png", "label": "Minh họa ngoài", "rights_confirmed": True})
+        self.assertEqual(asset.status_code, 201, asset.text)
+        self.assertEqual(client.post(f"/api/v1/projects/{project['id']}/slides/{slide_id}/media", json={"asset_id": asset.json()["id"], "expected_revision": 1}).status_code, 200)
+        exported = client.post("/api/export-scorm", json={"title": "Bài URL", "direction": "lesson", "objectives": [], "sections": [], "quizzes": [], "project_id": project["id"]})
+        self.assertEqual(exported.status_code, 200, exported.text)
+        self.assertEqual(exported.headers["X-SCORM-Warning-Count"], "1")
+        with zipfile.ZipFile(io.BytesIO(exported.content)) as package:
+            self.assertEqual([name for name in package.namelist() if name.startswith("assets/")], [])
+            self.assertIn("https://media.example.test/lesson.png", package.read("index.html").decode())
 
     def test_log_redaction_hides_common_secret_shapes(self):
         line = redact("Authorization: Bearer secret-value Cookie: session=abc api_key=sk-123456789")

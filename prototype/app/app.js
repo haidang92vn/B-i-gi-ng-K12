@@ -16,7 +16,7 @@ function applyProjectAccess(){const viewer=!canEditProject();[lessonTitle,source
 async function loadLibrary(){const r=await fetch('/api/v1/projects');if(!r.ok)return;const items=await r.json();libraryList.innerHTML=items.length?items.map(p=>{const access=p.access_level||'owner';const ownerActions=access==='owner'?`<button onclick="shareProject('${p.id}')">Chia sẻ</button><button onclick="archiveProject('${p.id}')">Lưu trữ</button><button onclick="deleteProject('${p.id}')">Xóa</button>`:'';return `<article class="library-item"><strong>${escapeHtml(p.title)}</strong><small>${p.status} • phiên bản ${p.revision} • ${accessLabels[access]}</small><div class="library-actions"><button onclick="openProject('${p.id}')">Mở</button><button onclick="copyProject('${p.id}')">Nhân bản</button>${ownerActions}</div></article>`;}).join(''):'<p class="hint">Chưa có bài giảng nào.</p>';}
 libraryBtn.onclick=()=>{libraryDrawer.classList.add('open');loadLibrary();};closeLibraryBtn.onclick=()=>libraryDrawer.classList.remove('open');
 newLessonBtn.onclick=()=>{libraryDrawer.classList.remove('open');state={direction:'lesson',generated:null,project:null};location.reload();};
-function hydrateProject(project){state.project=project;const c=project.course;state.direction=c.metadata.direction;lessonTitle.value=c.metadata.title;state.generated={course:c,direction_name:{lesson:'Bài học mới',review:'Ôn tập – củng cố',advanced:'Nâng cao – mở rộng'}[c.metadata.direction],objectives:c.objectives.map(x=>x.text),sections:c.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',note:s.speaker_notes||'',status:s.status,layout:s.layout})),quizzes:c.question_bank.map(q=>({id:q.id,question:q.question,options:q.options,answer:q.correct_answer,quiz_type:q.type,selected:q.selected,score:q.score,difficulty:q.difficulty,objective_ids:q.objective_ids||[],explanation:q.explanation||'',feedback_correct:q.feedback_correct||'',feedback_incorrect:q.feedback_incorrect||''}))};applyProjectAccess();}
+function hydrateProject(project){state.project=project;const c=project.course;state.direction=c.metadata.direction;lessonTitle.value=c.metadata.title;state.generated={course:c,direction_name:{lesson:'Bài học mới',review:'Ôn tập – củng cố',advanced:'Nâng cao – mở rộng'}[c.metadata.direction],objectives:c.objectives.map(x=>x.text),sections:c.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',mediaBlocks:s.blocks.filter(b=>b.type!=='text'),note:s.speaker_notes||'',status:s.status,layout:s.layout})),quizzes:c.question_bank.map(q=>({id:q.id,question:q.question,options:q.options,answer:q.correct_answer,quiz_type:q.type,selected:q.selected,score:q.score,difficulty:q.difficulty,objective_ids:q.objective_ids||[],explanation:q.explanation||'',feedback_correct:q.feedback_correct||'',feedback_incorrect:q.feedback_incorrect||''}))};applyProjectAccess();}
 async function openProject(id){const r=await fetch(`/api/v1/projects/${id}`);if(!r.ok)return;hydrateProject(await r.json());renderAI();renderReview();renderQuiz();libraryDrawer.classList.remove('open');setStep(4);}
 const credentialsBtn = document.getElementById('credentialsBtn');
 const credentialsDrawer = document.getElementById('credentialsDrawer');
@@ -67,7 +67,7 @@ function setStep(n){
   document.getElementById("backBtn").disabled = currentStep===1;
   document.getElementById("nextBtn").textContent = currentStep===8 ? "Hoàn tất" : "Tiếp tục →";
   if(currentStep===3) loadCredentials();
-  if(currentStep===6) refreshPreview();
+  if(currentStep===6){refreshPreview();loadMedia();}
   if(currentStep===8) refreshExportName();
 }
 document.querySelectorAll(".step").forEach(btn=>btn.addEventListener("click",()=>setStep(Number(btn.dataset.step))));
@@ -120,7 +120,7 @@ function syncCanonicalCourse(){
   course.objectives=g.objectives.map((text,i)=>({id:`o${i+1}`,text}));
   course.slides=g.sections.map((s,i)=>({
     id:s.id || `s${i+1}`,title:s.title,layout:s.layout||"content",status:s.status||"ai_draft",
-    blocks:[{id:`${s.id || `s${i+1}`}-text`,type:"text",text:s.content,settings:{}}],
+    blocks:[{id:`${s.id || `s${i+1}`}-text`,type:"text",text:s.content,settings:{}},...(s.mediaBlocks||[])],
     speaker_notes:s.note || null
   }));
   course.question_bank=g.quizzes.map(q=>({
@@ -139,7 +139,7 @@ async function createProjectFromGenerated(){
   state.project=await response.json();
   applyProjectAccess();
   state.generated.course=state.project.course;
-  state.generated.sections=state.project.course.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',note:s.speaker_notes||'',status:s.status,layout:s.layout}));
+  state.generated.sections=state.project.course.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',mediaBlocks:s.blocks.filter(b=>b.type!=='text'),note:s.speaker_notes||'',status:s.status,layout:s.layout}));
 }
 
 function scheduleSave(){
@@ -266,6 +266,39 @@ function refreshPreview(){
   p.innerHTML=`<span class="eyebrow">${escapeHtml(g.direction_name)}</span><h3>${escapeHtml(title)}</h3><p><strong>${escapeHtml(first.title)}</strong></p><p>${escapeHtml(first.content)}</p>`;
 }
 document.getElementById("openPlayerBtn").onclick=()=>{if(!state.project){alert("Hãy tạo và lưu bản nháp bài giảng trước.");return;}window.open(`/api/v1/projects/${state.project.id}/player`,"_blank","noopener");};
+
+function mediaSlideOptions(){
+  const select=document.getElementById('mediaSlideSelect');
+  if(!state.generated){select.innerHTML='<option value="">Chưa có slide</option>';return;}
+  const previous=select.value;
+  select.innerHTML=state.generated.sections.map((slide,index)=>`<option value="${escapeHtml(slide.id)}">Slide ${index+1}: ${escapeHtml(slide.title)}</option>`).join('');
+  if([...select.options].some(option=>option.value===previous))select.value=previous;
+}
+function mediaPreview(item){const source=escapeHtml(item.content_url),label=escapeHtml(item.original_name);if(item.kind==='image')return `<img src="${source}" alt="${label}">`;if(item.kind==='audio')return `<audio controls preload="metadata" src="${source}"></audio>`;return `<video controls preload="metadata" src="${source}"></video>`;}
+function setMediaStatus(message,type='hint'){const target=document.getElementById('mediaStatus');target.className=type;target.textContent=message;}
+function setMediaControlsDisabled(disabled){document.querySelectorAll('#imageForm button,#ttsForm button,#mediaUploadForm button,#mediaUrlForm button,#mediaSlideSelect').forEach(el=>el.disabled=disabled);}
+async function loadMedia(){
+  mediaSlideOptions();const area=document.getElementById('mediaList');
+  if(!state.project){area.innerHTML='';setMediaStatus('Hãy tạo hoặc mở bài giảng trước để thêm media.');setMediaControlsDisabled(true);return;}
+  setMediaControlsDisabled(!canEditProject());
+  const response=await fetch(`/api/v1/projects/${state.project.id}/media`);
+  if(!response.ok){setMediaStatus('Không thể tải danh sách media.','error');return;}
+  const items=await response.json();
+  setMediaStatus(items.length?`${items.length} media đã lưu. Xem thử trước rồi chọn gắn vào slide.`:'Chưa có media cho bài giảng này.');
+  area.innerHTML=items.map(item=>`<article class="media-item"><strong>${escapeHtml(item.original_name)}</strong><small>${escapeHtml(item.source_type)} • ${Math.round(item.byte_size/1024)} KB • ${escapeHtml(item.status)}</small>${mediaPreview(item)}${item.warning?`<p>${escapeHtml(item.warning)}</p>`:''}${item.status!=='attached'&&canEditProject()?`<button class="primary" onclick="attachMedia('${item.id}','${item.slide_id||''}')">Gắn vào slide</button>`:''}</article>`).join('');
+}
+async function mediaRequest(url,options,successMessage){
+  setMediaStatus('Đang tạo/tải media…');
+  const response=await fetch(url,options);
+  if(!response.ok){setMediaStatus((await apiMessage(response))||'Không thể xử lý media.','error');return null;}
+  const item=await response.json();setMediaStatus(successMessage);await loadMedia();return item;
+}
+function selectedMediaSlide(){const id=document.getElementById('mediaSlideSelect').value;if(!state.project||!id){setMediaStatus('Hãy tạo bài giảng và chọn slide trước.','error');return null;}return id;}
+document.getElementById('imageForm').onsubmit=async event=>{event.preventDefault();const slide=selectedMediaSlide();if(!slide)return;await mediaRequest(`/api/v1/projects/${state.project.id}/slides/${slide}/image`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:document.getElementById('imagePrompt').value,provider:generationProvider.value,credential_id:generationCredential.value||null})},'Ảnh đã tạo. Hãy xem thử và gắn vào slide khi phù hợp.');};
+document.getElementById('ttsForm').onsubmit=async event=>{event.preventDefault();const slide=selectedMediaSlide();if(!slide)return;await mediaRequest(`/api/v1/projects/${state.project.id}/slides/${slide}/tts`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:document.getElementById('ttsText').value,voice:document.getElementById('ttsVoice').value||'alloy',provider:generationProvider.value,credential_id:generationCredential.value||null})},'Giọng đọc đã tạo. Hãy nghe thử và gắn vào slide khi phù hợp.');};
+document.getElementById('mediaUploadForm').onsubmit=async event=>{event.preventDefault();const slide=selectedMediaSlide(),file=document.getElementById('mediaUpload').files[0];if(!slide||!file)return;const data=new FormData();data.append('upload',file);await mediaRequest(`/api/v1/projects/${state.project.id}/media/upload?slide_id=${encodeURIComponent(slide)}&rights_confirmed=${document.getElementById('uploadRights').checked}`,{method:'POST',body:data},'Đã tải tệp. Hãy xem thử và gắn vào slide khi phù hợp.');};
+document.getElementById('mediaUrlForm').onsubmit=async event=>{event.preventDefault();const slide=selectedMediaSlide();if(!slide)return;await mediaRequest(`/api/v1/projects/${state.project.id}/media/url?slide_id=${encodeURIComponent(slide)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:document.getElementById('mediaUrlKind').value,url:document.getElementById('mediaUrl').value,label:document.getElementById('mediaUrlLabel').value,rights_confirmed:document.getElementById('urlRights').checked})},'Đã lưu URL. Hãy xem thử và gắn vào slide khi phù hợp.');};
+async function attachMedia(assetId,slideId){if(!state.project||!slideId)return;const response=await fetch(`/api/v1/projects/${state.project.id}/slides/${slideId}/media`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({asset_id:assetId,expected_revision:state.project.revision})});if(!response.ok){setMediaStatus((await apiMessage(response))||'Không thể gắn media vào slide.','error');return;}hydrateProject(await response.json());setMediaStatus('Đã gắn media vào course.json và lưu phiên bản mới.');refreshPreview();await loadMedia();}
 
 function slugName(s){return (s||"Bai_hoc").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"");}
 function refreshExportName(){document.getElementById("exportName").textContent=`${slugName(document.getElementById("lessonTitle").value)}_SCORM2004.zip`;loadExportHistory();}

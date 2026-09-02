@@ -32,6 +32,7 @@ architecture. It is **not yet the production application**.
 - The export step includes a deterministic, non-blocking quality check over canonical course data. It flags AI-draft slides, text density, question stem/options/answer structure, duplicates, zero-score quiz questions and missing objective links without calling an AI provider or replacing the SCORM technical gate.
 - School teams support explicit school administrators and teacher members. Project owners can share a lesson only with a registered teacher in a common school, as `viewer` or `editor`; the prototype UI locks viewer editing while retaining player, quality-check and SCORM-export access.
 - The school shared-question library keeps subject, grade, topic, learning objectives, answer, difficulty and reviewer attribution. Teachers submit a draft from an edited course question; school admins publish or reject it, and only published copies can be added back into a project.
+- Media/TTS supports an explicit teacher preview before attachment. Media bytes live in R2-compatible storage and course slides keep only `asset_id` references; upload validation, rights confirmation, private preview, SCORM asset packaging and large-video warnings are implemented. OpenAI and Gemini remain provider adapters, with Mock AI available for the demo.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 
@@ -41,6 +42,6 @@ architecture. It is **not yet the production application**.
 - Full quiz renderers for matching/ordering/drag-drop/image interactions.
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
 - A production Next.js frontend and actual background-job handlers (the current Compose worker only validates Redis connectivity).
-- Media/TTS and analytics.
+- Analytics.
 
 Follow `TASKS.md` and the numbered files in `prompts/` to implement these in order.

@@ -1,7 +1,7 @@
 
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile, status
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Any, List, Literal, Optional
 from pathlib import Path
@@ -11,11 +11,12 @@ from xml.etree import ElementTree
 from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 
-from prototype.course_models import Course, Question, Slide, new_course
+from prototype.course_models import Block, Course, Question, Slide, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
 from prototype.credentials import decrypt, encrypt
-from prototype.persistence import AICredential, AuthSession, ExportRecord, GenerationRun, Project, ProjectShare, School, SchoolMembership, SharedQuestion, SourceMaterial, User, create_schema, make_session_factory
-from prototype.providers import ProviderError, ProviderResult, provider_for
+from prototype.persistence import AICredential, AuthSession, ExportRecord, GenerationRun, MediaAsset, Project, ProjectShare, School, SchoolMembership, SharedQuestion, SourceMaterial, User, create_schema, make_session_factory
+from prototype.providers import ProviderError, ProviderResult, media_provider_for, provider_for
+from prototype.media import SCORM_VIDEO_WARNING_BYTES, extension_for_mime, validate_media_upload, validate_media_url
 from prototype.sources import extract_text, validate_upload
 from prototype.storage import Storage
 from prototype.logging_config import configure_logging
@@ -191,6 +192,49 @@ class SharedQuestionResponse(BaseModel):
 
 class SourceResponse(BaseModel):
     id: str; original_name: str; mime_type: str; byte_size: int; extracted_text: str | None
+
+
+class MediaUrlRequest(BaseModel):
+    kind: Literal["image", "audio", "video"]
+    url: str = Field(min_length=12, max_length=2000)
+    label: str = Field(min_length=1, max_length=255)
+    rights_confirmed: bool = False
+
+
+class MediaImageRequest(BaseModel):
+    prompt: str = Field(min_length=5, max_length=4000)
+    provider: Literal["mock", "openai", "gemini"] = "mock"
+    credential_id: str | None = None
+
+
+class MediaTTSRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4096)
+    voice: str = Field(default="alloy", min_length=2, max_length=40)
+    provider: Literal["mock", "openai", "gemini"] = "mock"
+    credential_id: str | None = None
+
+
+class MediaAttachRequest(BaseModel):
+    asset_id: str = Field(min_length=1, max_length=36)
+    expected_revision: int = Field(ge=1)
+
+
+class MediaResponse(BaseModel):
+    id: str
+    project_id: str
+    slide_id: str | None
+    kind: Literal["image", "audio", "video"]
+    source_type: Literal["upload", "url", "generated", "tts"]
+    original_name: str
+    mime_type: str
+    byte_size: int
+    prompt: str | None
+    provider: str | None
+    model: str | None
+    rights_confirmed: bool
+    status: str
+    content_url: str
+    warning: str | None = None
 class CredentialCreateRequest(BaseModel):
     provider: Literal["openai", "gemini"]
     secret: str = Field(min_length=8, max_length=500)
@@ -638,6 +682,7 @@ class ExportRequest(BaseModel):
     primary_color: str | None = None
     require_quiz: bool = True
     project_id: str | None = None
+    media_by_id: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 def compact_sentences(text: str):
     text = re.sub(r"\s+", " ", text or "").strip()
@@ -1080,8 +1125,178 @@ def list_sources(project_id: str, user: User = Depends(current_teacher), db: Ses
     project_with_access(db, project_id, user)
     return [SourceResponse(id=x.id, original_name=x.original_name, mime_type=x.mime_type, byte_size=x.byte_size, extracted_text=x.extracted_text) for x in db.scalars(select(SourceMaterial).where(SourceMaterial.project_id == project_id)).all()]
 
-def scorm_manifest(title: str):
+
+def media_warning(item: MediaAsset) -> str | None:
+    if item.kind == "video" and item.byte_size > SCORM_VIDEO_WARNING_BYTES:
+        return "Video lớn hơn 25 MB: sẽ làm SCORM ZIP nặng; cân nhắc nén, chia nhỏ hoặc dùng URL HTTPS được LMS cho phép."
+    if item.source_type == "url":
+        return "URL ngoài không được sao chép vào SCORM; cần kiểm tra quyền sử dụng và khả năng truy cập của LMS trước khi xuất."
+    return None
+
+
+def serialise_media(item: MediaAsset) -> MediaResponse:
+    return MediaResponse(
+        id=item.id, project_id=item.project_id, slide_id=item.slide_id, kind=item.kind, source_type=item.source_type,
+        original_name=item.original_name, mime_type=item.mime_type, byte_size=item.byte_size, prompt=item.prompt,
+        provider=item.provider, model=item.model, rights_confirmed=item.rights_confirmed, status=item.status,
+        content_url=f"/api/v1/media/{item.id}/content", warning=media_warning(item),
+    )
+
+
+def require_slide(project: Project, slide_id: str) -> Course:
+    course = Course.model_validate(project.course_json)
+    if not any(slide.id == slide_id for slide in course.slides):
+        raise HTTPException(status_code=404, detail="Slide not found.")
+    return course
+
+
+def create_media_asset(db: Session, *, project_id: str, user_id: str, slide_id: str | None, kind: str,
+                       source_type: str, original_name: str, mime_type: str, content: bytes | None = None,
+                       external_url: str | None = None, prompt: str | None = None, provider: str | None = None,
+                       model: str | None = None, rights_confirmed: bool = False) -> MediaAsset:
+    import uuid
+    asset = MediaAsset(user_id=user_id, project_id=project_id, slide_id=slide_id, kind=kind, source_type=source_type,
+                       original_name=original_name, mime_type=mime_type, byte_size=len(content or b""),
+                       external_url=external_url, prompt=prompt, provider=provider, model=model,
+                       rights_confirmed=rights_confirmed, status="draft")
+    if content is not None:
+        asset.storage_key = f"users/{user_id}/projects/{project_id}/media/{uuid.uuid4()}{extension_for_mime(mime_type)}"
+        storage.put(asset.storage_key, content, mime_type)
+    db.add(asset)
+    return asset
+
+
+@app.post("/api/v1/projects/{project_id}/media/upload", response_model=MediaResponse, status_code=status.HTTP_201_CREATED)
+async def upload_media(project_id: str, slide_id: str, rights_confirmed: bool, upload: UploadFile = File(...),
+                       user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project, _ = project_with_access(db, project_id, user, require_edit=True)
+    require_slide(project, slide_id)
+    if not rights_confirmed:
+        raise HTTPException(status_code=422, detail="Cần xác nhận quyền sử dụng ảnh, âm thanh hoặc video trước khi tải lên.")
+    content = await upload.read()
+    try:
+        kind = validate_media_upload(upload.filename or "", upload.content_type or "", content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    asset = create_media_asset(db, project_id=project_id, user_id=user.id, slide_id=slide_id, kind=kind,
+                               source_type="upload", original_name=upload.filename or "media", mime_type=upload.content_type or "",
+                               content=content, rights_confirmed=True)
+    db.commit(); db.refresh(asset)
+    return serialise_media(asset)
+
+
+@app.post("/api/v1/projects/{project_id}/media/url", response_model=MediaResponse, status_code=status.HTTP_201_CREATED)
+def add_media_url(project_id: str, slide_id: str, payload: MediaUrlRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project, _ = project_with_access(db, project_id, user, require_edit=True)
+    require_slide(project, slide_id)
+    if not payload.rights_confirmed:
+        raise HTTPException(status_code=422, detail="Cần xác nhận quyền sử dụng media trước khi lưu URL.")
+    try:
+        validate_media_url(payload.url, payload.kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    mime_type = {"image": "image/*", "audio": "audio/*", "video": "video/*"}[payload.kind]
+    asset = create_media_asset(db, project_id=project_id, user_id=user.id, slide_id=slide_id, kind=payload.kind,
+                               source_type="url", original_name=payload.label, mime_type=mime_type,
+                               external_url=payload.url, rights_confirmed=True)
+    db.commit(); db.refresh(asset)
+    return serialise_media(asset)
+
+
+def run_media_provider(provider: str, credential_id: str | None, user: User, db: Session):
+    if provider == "mock":
+        return media_provider_for("mock"), None
+    credential = selected_credential(provider, credential_id, user, db)
+    return media_provider_for(provider, api_key=decrypt(credential.encrypted_secret)), credential
+
+
+@app.post("/api/v1/projects/{project_id}/slides/{slide_id}/image", response_model=MediaResponse, status_code=status.HTTP_201_CREATED)
+def generate_slide_image(project_id: str, slide_id: str, payload: MediaImageRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project, _ = project_with_access(db, project_id, user, require_edit=True)
+    require_slide(project, slide_id)
+    try:
+        adapter, _ = run_media_provider(payload.provider, payload.credential_id, user, db)
+        generated = adapter.generate_image(prompt=payload.prompt)
+    except (ProviderError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Không thể tạo ảnh. Hãy kiểm tra API key, model và hạn mức rồi thử lại.") from exc
+    asset = create_media_asset(db, project_id=project_id, user_id=user.id, slide_id=slide_id, kind="image",
+                               source_type="generated", original_name="ai-image.png", mime_type=generated.mime_type,
+                               content=generated.content, prompt=payload.prompt, provider=payload.provider,
+                               model=generated.metadata.get("model"), rights_confirmed=True)
+    record_generation(db, user_id=user.id, project_id=project_id, operation="media_image",
+                      metadata={"provider": payload.provider, **generated.metadata})
+    db.commit(); db.refresh(asset)
+    return serialise_media(asset)
+
+
+@app.post("/api/v1/projects/{project_id}/slides/{slide_id}/tts", response_model=MediaResponse, status_code=status.HTTP_201_CREATED)
+def generate_slide_tts(project_id: str, slide_id: str, payload: MediaTTSRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project, _ = project_with_access(db, project_id, user, require_edit=True)
+    require_slide(project, slide_id)
+    try:
+        adapter, _ = run_media_provider(payload.provider, payload.credential_id, user, db)
+        # Alloy is the default shown for OpenAI. Use a Gemini-compatible default when the teacher
+        # has not changed it; custom voices still pass through the provider adapter untouched.
+        voice = "Kore" if payload.provider == "gemini" and payload.voice.lower() == "alloy" else payload.voice
+        generated = adapter.synthesize_speech(text=payload.text, voice=voice)
+    except (ProviderError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Không thể tạo giọng đọc. Hãy kiểm tra API key, model, giọng đọc và hạn mức rồi thử lại.") from exc
+    asset = create_media_asset(db, project_id=project_id, user_id=user.id, slide_id=slide_id, kind="audio",
+                               source_type="tts", original_name="slide-tts" + extension_for_mime(generated.mime_type), mime_type=generated.mime_type,
+                               content=generated.content, prompt=payload.text, provider=payload.provider,
+                               model=generated.metadata.get("model"), rights_confirmed=True)
+    record_generation(db, user_id=user.id, project_id=project_id, operation="media_tts",
+                      metadata={"provider": payload.provider, **generated.metadata})
+    db.commit(); db.refresh(asset)
+    return serialise_media(asset)
+
+
+@app.get("/api/v1/projects/{project_id}/media", response_model=list[MediaResponse])
+def list_media(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project_with_access(db, project_id, user)
+    items = db.scalars(select(MediaAsset).where(MediaAsset.project_id == project_id).order_by(MediaAsset.created_at.desc())).all()
+    return [serialise_media(item) for item in items]
+
+
+@app.get("/api/v1/media/{asset_id}/content")
+def media_content(asset_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    asset = db.get(MediaAsset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Media not found.")
+    project_with_access(db, asset.project_id, user)
+    if asset.external_url:
+        return RedirectResponse(asset.external_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    if not asset.storage_key:
+        raise HTTPException(status_code=404, detail="Media content is unavailable.")
+    return StreamingResponse(io.BytesIO(storage.get(asset.storage_key)), media_type=asset.mime_type)
+
+
+@app.post("/api/v1/projects/{project_id}/slides/{slide_id}/media", response_model=ProjectResponse)
+def attach_media(project_id: str, slide_id: str, payload: MediaAttachRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    project, _ = project_with_access(db, project_id, user, require_edit=True)
+    if project.revision != payload.expected_revision:
+        raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
+    asset = db.scalar(select(MediaAsset).where(MediaAsset.id == payload.asset_id, MediaAsset.project_id == project_id))
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Media asset not found in this project.")
+    course = require_slide(project, slide_id)
+    slide = next(item for item in course.slides if item.id == slide_id)
+    if not any(block.asset_id == asset.id for block in slide.blocks):
+        slide.blocks.append(Block(id=f"asset-{asset.id}", type=asset.kind, asset_id=asset.id, settings={"source_type": asset.source_type}))
+    course.revision = payload.expected_revision + 1
+    result = db.execute(update(Project).where(Project.id == project_id, Project.revision == payload.expected_revision).values(
+        course_json=course.model_dump(mode="json"), revision=course.revision, schema_version=course.schema_version,
+    ))
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
+    asset.status = "attached"
+    db.commit()
+    return get_project(project_id, user, db)
+
+def scorm_manifest(title: str, asset_paths: list[str] | None = None):
     safe_title = html.escape(title)
+    media_files = "".join(f'      <file href="{html.escape(path, quote=True)}"/>\n' for path in (asset_paths or []))
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <manifest identifier="AI_SCORM_STUDIO_DEMO"
  xmlns="http://www.imsglobal.org/xsd/imscp_v1p1"
@@ -1106,6 +1321,7 @@ def scorm_manifest(title: str):
     <resource identifier="RES-1" type="webcontent" adlcp:scormType="sco" href="index.html">
       <file href="index.html"/>
       <file href="runtime.js"/>
+{media_files}
     </resource>
   </resources>
 </manifest>'''
@@ -1190,12 +1406,15 @@ window.addEventListener("load", scormInit);
 window.addEventListener("beforeunload", scormFinish);
 '''
 
-def export_request_from_course(course: Course) -> ExportRequest:
+def export_request_from_course(course: Course, media_by_id: dict[str, dict[str, str]] | None = None) -> ExportRequest:
+    media_by_id = media_by_id or {}
     return ExportRequest(
         title=course.metadata.title, direction=course.metadata.direction,
         objectives=[item.text for item in course.objectives],
         sections=[{"id": slide.id, "title": slide.title, "layout": slide.layout,
-                   "content": next((block.text for block in slide.blocks if block.type == "text"), "")}
+                   "content": next((block.text for block in slide.blocks if block.type == "text"), ""),
+                   "media": [{"id": block.asset_id, "kind": block.type, **media_by_id[block.asset_id]}
+                             for block in slide.blocks if block.asset_id and block.asset_id in media_by_id]}
                   for slide in course.slides],
         quizzes=[QuizItem(id=item.id, question=item.question, options=item.options,
                           answer=json.dumps(item.correct_answer, ensure_ascii=False) if not isinstance(item.correct_answer, str) else item.correct_answer,
@@ -1203,6 +1422,7 @@ def export_request_from_course(course: Course) -> ExportRequest:
         passing_score=course.completion.passing_score, completion_percent=course.completion.viewed_percent,
         resume=course.scorm.resume, navigation_mode=course.navigation.mode,
         show_menu=course.navigation.show_menu, primary_color=course.theme.primary_color, require_quiz=course.completion.require_quiz,
+        media_by_id=media_by_id,
     )
 
 
@@ -1232,11 +1452,26 @@ def build_course_html(req: ExportRequest):
     for idx, s in enumerate(req.sections, start=1):
         content = html.escape(str(s.get("content",""))).replace("\n", "<br>")
         layout = re.sub(r"[^a-z0-9_-]", "", str(s.get("layout", "content")).lower()) or "content"
+        media_html = []
+        for media in s.get("media", []):
+            source = str(media.get("src", ""))
+            kind = str(media.get("kind", ""))
+            label = html.escape(str(media.get("label", "Học liệu minh họa")))
+            if not source or kind not in {"image", "audio", "video"}:
+                continue
+            safe_src = html.escape(source, quote=True)
+            if kind == "image":
+                media_html.append(f'<figure class="media image"><img src="{safe_src}" alt="{label}"><figcaption>{label}</figcaption></figure>')
+            elif kind == "audio":
+                media_html.append(f'<figure class="media audio"><figcaption>{label}</figcaption><audio controls preload="metadata" src="{safe_src}">Trình duyệt không hỗ trợ âm thanh.</audio></figure>')
+            else:
+                media_html.append(f'<figure class="media video"><video controls preload="metadata" src="{safe_src}">Trình duyệt không hỗ trợ video.</video><figcaption>{label}</figcaption></figure>')
         slides.append(f'''
           <section class="slide layout-{layout}" data-slide="{idx}">
             <div class="eyebrow">Nội dung {idx}</div>
             <h2>{html.escape(str(s.get("title","Phần học")))}</h2>
             <div class="content">{content}</div>
+            {''.join(media_html)}
           </section>
         ''')
 
@@ -1300,6 +1535,7 @@ body{{margin:0;font-family:Inter,system-ui,Arial,sans-serif;background:var(--bg)
 h1{{font-size:44px;margin:12px 0}} h2{{font-size:34px}} .lead{{font-size:20px;color:var(--muted)}}
 .card,.question{{background:#f8f9fd;border:1px solid #e5e7ef;border-radius:18px;padding:20px;margin-top:20px}}
 .content{{font-size:20px;line-height:1.7;white-space:normal}} .options{{display:grid;gap:10px;margin-top:14px}}
+.media{{margin:22px 0 0;padding:14px;border:1px solid #e5e7ef;border-radius:16px;background:#f8f9fd}}.media img,.media video{{display:block;max-width:100%;max-height:420px;border-radius:10px;margin:auto}}.media audio{{width:100%;margin-top:8px}}.media figcaption{{font-size:13px;color:var(--muted);margin-top:8px}}
 .options label{{background:#fff;border:1px solid #dde2ee;border-radius:12px;padding:12px;cursor:pointer}}
 .fill{{width:100%;padding:12px;border-radius:10px;border:1px solid #cfd5e2}}
 .qmeta{{font-size:11px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}}
@@ -1397,27 +1633,55 @@ window.addEventListener("load",()=>{{
 
 @app.post("/api/export-scorm")
 def export_scorm(req: ExportRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
-    files = {"imsmanifest.xml": scorm_manifest(req.title).encode(), "index.html": build_course_html(req).encode(), "runtime.js": runtime_js().encode()}
-    errors = validate_scorm_package(files, passing_score=req.passing_score, completion_percent=req.completion_percent)
+    effective = req
+    files: dict[str, bytes] = {"runtime.js": runtime_js().encode()}
+    warnings: list[str] = []
+    if req.project_id:
+        project, _ = project_with_access(db, req.project_id, user)
+        course = Course.model_validate(project.course_json)
+        referenced_ids = {block.asset_id for slide in course.slides for block in slide.blocks if block.asset_id}
+        assets = db.scalars(select(MediaAsset).where(MediaAsset.project_id == project.id, MediaAsset.id.in_(referenced_ids))).all() if referenced_ids else []
+        media_by_id: dict[str, dict[str, str]] = {}
+        asset_paths: list[str] = []
+        for asset in assets:
+            if asset.external_url:
+                media_by_id[asset.id] = {"src": asset.external_url, "kind": asset.kind, "label": asset.original_name}
+            elif asset.storage_key:
+                path = f"assets/{asset.id}{extension_for_mime(asset.mime_type)}"
+                try:
+                    files[path] = storage.get(asset.storage_key)
+                except Exception as exc:
+                    raise HTTPException(status_code=422, detail=f"Không thể đọc media {asset.original_name} để đóng gói SCORM.") from exc
+                asset_paths.append(path)
+                media_by_id[asset.id] = {"src": path, "kind": asset.kind, "label": asset.original_name}
+            warning = media_warning(asset)
+            if warning:
+                warnings.append(warning)
+        effective = export_request_from_course(course, media_by_id)
+        effective.passing_score, effective.completion_percent, effective.resume = req.passing_score, req.completion_percent, req.resume
+        effective.project_id = project.id
+        files["imsmanifest.xml"] = scorm_manifest(effective.title, asset_paths).encode()
+    else:
+        files["imsmanifest.xml"] = scorm_manifest(effective.title).encode()
+    files["index.html"] = build_course_html(effective).encode()
+    errors = validate_scorm_package(files, passing_score=effective.passing_score, completion_percent=effective.completion_percent)
     if errors:
         raise HTTPException(status_code=422, detail={"code": "SCORM_PACKAGE_INVALID", "errors": errors})
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
         for name, content in files.items(): z.writestr(name, content)
-    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", req.title).strip("_") or "bai_giang"
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", effective.title).strip("_") or "bai_giang"
     filename = f"{safe}_SCORM2004.zip"
     package = mem.getvalue()
-    if req.project_id:
-        project_with_access(db, req.project_id, user)
     storage_key = f"users/{user.id}/exports/{__import__('uuid').uuid4()}-{filename}"
     storage.put(storage_key, package, "application/zip")
-    record = ExportRecord(user_id=user.id, project_id=req.project_id, filename=filename, storage_key=storage_key, byte_size=len(package), validation_json={"errors": []})
+    record = ExportRecord(user_id=user.id, project_id=effective.project_id, filename=filename, storage_key=storage_key, byte_size=len(package), validation_json={"errors": [], "warnings": warnings})
     db.add(record); db.commit()
     mem.seek(0)
     return StreamingResponse(
         mem,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"', "X-Export-Id": record.id}
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "X-Export-Id": record.id, "X-SCORM-Warning-Count": str(len(warnings))}
     )
 
 
@@ -1429,7 +1693,11 @@ def list_exports(user: User = Depends(current_teacher), db: Session = Depends(ge
 @app.get("/api/v1/projects/{project_id}/player", response_class=HTMLResponse)
 def preview_player(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
     project, _ = project_with_access(db, project_id, user)
-    return HTMLResponse(build_course_html(export_request_from_course(Course.model_validate(project.course_json))))
+    course = Course.model_validate(project.course_json)
+    referenced_ids = {block.asset_id for slide in course.slides for block in slide.blocks if block.asset_id}
+    assets = db.scalars(select(MediaAsset).where(MediaAsset.project_id == project.id, MediaAsset.id.in_(referenced_ids))).all() if referenced_ids else []
+    media_by_id = {asset.id: {"src": asset.external_url or f"/api/v1/media/{asset.id}/content", "kind": asset.kind, "label": asset.original_name} for asset in assets}
+    return HTMLResponse(build_course_html(export_request_from_course(course, media_by_id)))
 
 
 @app.get("/api/v1/projects/{project_id}/quality-check")

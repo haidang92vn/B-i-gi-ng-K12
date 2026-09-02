@@ -134,6 +134,29 @@ class SourceMaterial(Base):
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+
+class MediaAsset(Base):
+    __tablename__ = "media_assets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), index=True)
+    slide_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    source_type: Mapped[str] = mapped_column(String(20))
+    original_name: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(100))
+    byte_size: Mapped[int] = mapped_column(Integer, default=0)
+    storage_key: Mapped[str | None] = mapped_column(String(700), unique=True, nullable=True)
+    external_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    rights_confirmed: Mapped[bool] = mapped_column(default=False)
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 class AICredential(Base):
     __tablename__ = "ai_credentials"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))

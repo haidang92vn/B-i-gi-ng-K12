@@ -137,7 +137,7 @@ Acceptance:
 - [x] AI quality checker.
 - [x] question quality checks.
 - [x] slide text-density checks.
-- [ ] media/TTS.
+- [x] media/TTS.
 - [x] school/team accounts.
 - [x] shared question library.
 - [ ] analytics.

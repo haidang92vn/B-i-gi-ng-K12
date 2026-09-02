@@ -106,6 +106,20 @@ Never return `encrypted_secret` through normal API serializers.
 - created_at
 - deleted_at nullable
 
+## media_assets
+- id
+- user_id / project_id / slide_id nullable
+- kind: image / audio / video
+- source_type: upload / url / generated / tts
+- original_name / mime_type / byte_size
+- storage_key nullable / external_url nullable
+- prompt, provider and model nullable
+- rights_confirmed and status: draft / attached
+- created_at / updated_at
+
+Binary media stays in the S3-compatible object store. A canonical slide holds only its media
+block and `asset_id`; external URLs are never fetched by the backend.
+
 ## question_bank_items
 Do not require normalization in Milestone 01. Add later if cross-project reuse is implemented.
 

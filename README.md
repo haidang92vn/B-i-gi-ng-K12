@@ -149,6 +149,15 @@ teacher submits it; a school administrator must publish it before members can ad
 editable version to their own lesson. Reviewer attribution is retained. See
 [docs/SHARED_QUESTION_LIBRARY.md](docs/SHARED_QUESTION_LIBRARY.md).
 
+## Milestone 12.4: media and TTS
+
+At **Dựng bài giảng HTML5**, a teacher can generate an image or per-slide voice preview,
+upload a permitted media file, or add an approved public HTTPS URL. The asset remains a preview
+until the teacher explicitly attaches it to a slide. Uploaded/generated media goes to the
+R2-compatible object store and is packaged under `assets/` during SCORM export; external URLs
+remain external. File type/signature/size checks, rights confirmation and video ZIP warnings are
+included. See [docs/MEDIA_TTS.md](docs/MEDIA_TTS.md).
+
 ## Cấu trúc repository thực tế
 
 ```text

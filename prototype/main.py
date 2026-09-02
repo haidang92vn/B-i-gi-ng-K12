@@ -1736,6 +1736,13 @@ def build_course_html(req: ExportRequest):
             inputs.append(f'<input class="fill" name="{q.id}" placeholder="Nhập câu trả lời">')
         elif q.quiz_type == "dragdrop":
             inputs.append(f'<div class="drag-bank">{''.join(f"<button type=\"button\" class=\"drag-token\" draggable=\"true\" data-value=\"{html.escape(opt, quote=True)}\">{html.escape(opt)}</button>" for opt in opts)}</div><div class="drop-zone" data-question="{q.id}" aria-label="Vùng thả đáp án">Kéo các thẻ vào đây theo thứ tự đúng</div>')
+        elif q.quiz_type == "ordering":
+            inputs.append(f'<div class="drag-bank">{''.join(f"<button type=\"button\" class=\"drag-token\" draggable=\"true\" data-value=\"{html.escape(opt, quote=True)}\">{html.escape(opt)}</button>" for opt in opts)}</div><div class="drop-zone" data-question="{q.id}" aria-label="Vùng sắp xếp đáp án">Kéo các thẻ vào đây theo thứ tự đúng</div>')
+        elif q.quiz_type == "matching":
+            pairs = q.answer if isinstance(q.answer, dict) else {}
+            right_values = list(dict.fromkeys([str(value) for value in pairs.values()] + opts))
+            for left in pairs:
+                inputs.append(f'<label class="matching-option"><span>{html.escape(str(left))}</span><select data-match-left="{html.escape(str(left), quote=True)}"><option value="">Chọn đáp án</option>{''.join(f"<option value=\"{html.escape(value, quote=True)}\">{html.escape(value)}</option>" for value in right_values)}</select></label>')
         elif q.quiz_type == "image":
             image_options = q.settings.get("image_options", []) if isinstance(q.settings, dict) else []
             for item in image_options:
@@ -1806,7 +1813,7 @@ h1{{font-size:44px;margin:12px 0}} h2{{font-size:34px}} .lead{{font-size:20px;co
 .toolbar{{display:flex;gap:12px;align-items:center;padding:16px 24px;background:#fff;border-top:1px solid #e7eaf1;position:sticky;bottom:0}}
 .toolbar button,.primary{{border:0;border-radius:12px;padding:11px 18px;font-weight:700;cursor:pointer}}
 .primary,#next{{background:var(--accent);color:#fff}} #prev{{background:#eef1f7}} .spacer{{flex:1}}
-.progress{{height:8px;background:#e6e9f0;border-radius:99px;overflow:hidden;width:min(360px,35vw)}} .bar{{height:100%;background:var(--accent);width:0}}
+.progress{{height:8px;background:#e6e9f0;border-radius:99px;overflow:hidden;width:min(360px,35vw)}} .bar{{height:100%;background:var(--accent);width:0}}.matching-option{{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:center}}.matching-option select{{padding:10px;border-radius:10px;border:1px solid #cfd5e2;background:#fff}}
 #quizResult{{font-weight:700;margin-top:16px}}
 .menu{{position:fixed;left:16px;top:16px;width:220px;max-height:calc(100vh - 32px);overflow:auto;background:#fff;border:1px solid #e5e7ef;border-radius:14px;padding:10px;box-shadow:0 12px 35px rgba(20,30,50,.12)}}.menu button{{display:block;width:100%;border:0;background:transparent;padding:9px;text-align:left;border-radius:8px;cursor:pointer}}.menu button.active{{background:#edf1ff;color:var(--accent);font-weight:700}}.fullscreen{{background:#eef1f7}}.layout-two_column .content{{columns:2;column-gap:32px}}.layout-callout .content{{border-left:5px solid var(--accent);padding-left:20px}}@media(max-width:760px){{.stage{{padding:14px}}.slide{{padding:24px;min-height:calc(100vh - 88px)}}h1{{font-size:32px}}h2{{font-size:27px}}.toolbar{{padding:12px;gap:8px}}.progress{{width:80px}}.menu{{display:none}}.layout-two_column .content{{columns:1}}}}
 </style>
@@ -1831,6 +1838,7 @@ const ANSWERS = {json_for_script(answers)};
 const slides = [...document.querySelectorAll(".slide")];
 let current = 0;
 let highestVisited = 0;
+let quizSubmitted = false;
 
 function show(i){{
   if(CFG.navigationMode === "sequential" && i > highestVisited + 1) return;
@@ -1840,13 +1848,14 @@ function show(i){{
   slides.forEach((s,n)=>s.classList.toggle("active",n===current));
   document.getElementById("count").textContent = `${{current+1}} / ${{slides.length}}`;
   document.getElementById("bar").style.width = `${{((current+1)/slides.length)*100}}%`;
+  document.querySelector(".progress").hidden = !CFG.showProgress;
   document.getElementById("prev").disabled = current===0;
   document.getElementById("next").disabled = current===slides.length-1;
   scormSet("cmi.location", current);
   scormSuspend({{location:current,highestVisited}});
   const progress = Math.round(((current+1)/slides.length)*100);
   scormSet("cmi.progress_measure", progress/100);
-  if(progress >= CFG.completion) scormSet("cmi.completion_status","completed");
+  updateCompletion(progress);
   renderMenu();
 }}
 function go(delta){{ show(current+delta); }}
@@ -1857,6 +1866,7 @@ function renderMenu(){{
   menu.innerHTML=slides.map((slide,index)=>`<button class="${{index===current?"active":""}}" ${{index>highestVisited&&CFG.navigationMode!=="free"?"disabled":""}} onclick="show(${{index}})">Slide ${{index+1}}</button>`).join("");
 }}
 function toggleFullscreen(){{if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();else document.exitFullscreen?.();}}
+function updateCompletion(progress){{if(progress >= CFG.completion && (!CFG.requireQuiz || quizSubmitted))scormSet("cmi.completion_status","completed");}}
 let draggingToken=null;
 document.addEventListener("dragstart",event=>{{if(event.target.classList.contains("drag-token"))draggingToken=event.target;}});
 document.addEventListener("dragover",event=>{{const zone=event.target.closest(".drop-zone");if(zone){{event.preventDefault();zone.classList.add("drag-over");}}}});
@@ -1866,6 +1876,7 @@ function norm(value){{return String(value??"").trim().toLocaleLowerCase();}}
 function sameAnswer(type,value,answer){{
   if(type==="multiple"){{const left=[...value].map(norm).sort(),right=(Array.isArray(answer)?answer:[answer]).map(norm).sort();return JSON.stringify(left)===JSON.stringify(right);}}
   if(type==="ordering"||type==="dragdrop"){{const right=Array.isArray(answer)?answer:[answer];return JSON.stringify(value.map(norm))===JSON.stringify(right.map(norm));}}
+  if(type==="matching"){{const left=Object.entries(value).map(([key,item])=>[norm(key),norm(item)]).sort(),right=Object.entries(answer||{{}}).map(([key,item])=>[norm(key),norm(item)]).sort();return JSON.stringify(left)===JSON.stringify(right);}}
   return norm(value)===norm(answer);
 }}
 
@@ -1877,8 +1888,10 @@ function submitQuiz(){{
     let value="";
     if(type==="multiple"){{
       value=[...q.querySelectorAll("input:checked")].map(x=>x.value);
-    }} else if(type==="dragdrop"){{
+    }} else if(type==="dragdrop"||type==="ordering"){{
       value=[...q.querySelectorAll(".drop-zone .drag-token")].map(x=>x.dataset.value);
+    }} else if(type==="matching"){{
+      value=Object.fromEntries([...q.querySelectorAll("[data-match-left]")].map(x=>[x.dataset.matchLeft,x.value]));
     }} else {{
       const el=q.querySelector("input:checked") || q.querySelector(".fill");
       value=el ? el.value.trim() : "";
@@ -1891,6 +1904,8 @@ function submitQuiz(){{
   scormSet("cmi.score.max", 100);
   scormSet("cmi.score.scaled", score/100);
   scormSet("cmi.success_status", score >= CFG.passing ? "passed" : "failed");
+  quizSubmitted = true;
+  updateCompletion(Math.round(((current+1)/slides.length)*100));
   document.getElementById("quizResult").textContent =
     `Kết quả: ${{score}}/100 — ${{score >= CFG.passing ? "Đạt" : "Chưa đạt"}}`;
 }}

@@ -67,6 +67,20 @@ class CourseContractTests(unittest.TestCase):
         self.assertIn('src="assets/asset-2.png"', player)
         self.assertIn('sameAnswer(type,value,answer)', player)
 
+    def test_player_honours_quiz_completion_navigation_and_progress_settings(self):
+        module = load_prototype()
+        request = module.ExportRequest(
+            title="Player policy", direction="lesson", objectives=[], sections=[{"title": "Một", "content": "Nội dung"}],
+            quizzes=[module.QuizItem(id="match", question="Ghép các cặp tương ứng.", quiz_type="matching", answer={"A": "1", "B": "2"}, options=["1", "2"], selected=True), module.QuizItem(id="order", question="Sắp xếp đúng thứ tự.", quiz_type="ordering", answer=["Một", "Hai"], options=["Một", "Hai"], selected=True)],
+            navigation_mode="restricted", show_menu=False, require_quiz=True,
+        )
+        player = module.build_course_html(request)
+        self.assertIn('data-match-left="A"', player)
+        self.assertIn('data-type="ordering"', player)
+        self.assertIn('document.querySelector(".progress").hidden = !CFG.showProgress', player)
+        self.assertIn('(!CFG.requireQuiz || quizSubmitted)', player)
+        self.assertIn('CFG.navigationMode === "restricted"', player)
+
     def test_quality_checker_flags_incomplete_image_quiz(self):
         course = new_course("Ảnh thiếu asset")
         course.question_bank = [Question(id="image", type="image", question="Chọn đúng hình minh họa cho kiến thức.", correct_answer="img-1", selected=True, score=1, difficulty="recognize", settings={"image_options": [{"id": "img-1", "asset_id": "missing", "label": "Ảnh một"}]})]

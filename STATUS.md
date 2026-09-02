@@ -40,6 +40,7 @@ architecture. It is **not yet the production application**.
 - The quiz player and SCORM renderer support deterministic drag/drop ordering and image selection. Image choices reference project media assets through `course.json`, and export rejects a package with unresolved image references; see `docs/QUIZ_INTERACTIONS.md`.
 - The HTML5 player now applies its canonical menu/progress/completion settings at runtime. When a quiz is required, slide progress alone cannot mark the course complete; success remains independent and score-based. Matching and ordering render as actual interactions; see `docs/PLAYER_BEHAVIOR.md`.
 - The SCORM runtime harness now mirrors quiz-required completion, resume state including highest visited slide, success/score separation and non-negative session duration.
+- SCORM export validates both the manifest/file map and the completed ZIP container. It rejects unsafe paths, unreadable archives, duplicate/encrypted entries, missing root manifest, multiple SCOs, non-4th-Edition K12 presets and unlisted packaged assets before recording an export as ready.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 

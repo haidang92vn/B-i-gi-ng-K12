@@ -1586,25 +1586,65 @@ def validate_scorm_package(files: dict[str, bytes], *, passing_score: int, compl
         errors.append("Passing score must be between 0 and 100.")
     if not 0 <= completion_percent <= 100:
         errors.append("Completion percentage must be between 0 and 100.")
+    for name in files:
+        if not name or "\\" in name or name.startswith(("/", "//")) or re.match(r"^[A-Za-z]:", name) or any(part in {"", ".", ".."} for part in name.split("/")):
+            errors.append(f"Unsafe package path: {name}.")
     manifest = files.get("imsmanifest.xml", b"")
     try:
         root = ElementTree.fromstring(manifest)
         resources = [node for node in root.iter() if node.tag.endswith("resource")]
-        sco = next((node for node in resources if node.attrib.get("{http://www.adlnet.org/xsd/adlcp_v1p3}scormType") == "sco"), None)
+        scos = [node for node in resources if node.attrib.get("{http://www.adlnet.org/xsd/adlcp_v1p3}scormType") == "sco"]
+        sco = scos[0] if len(scos) == 1 else None
+        if len(scos) != 1:
+            errors.append("Manifest must declare exactly one SCORM SCO resource.")
         if sco is None or sco.attrib.get("href") != "index.html":
             errors.append("Manifest must declare index.html as a SCORM SCO launch resource.")
+        schema_version = next((node.text.strip() for node in root.iter() if node.tag.endswith("schemaversion") and node.text), "")
+        if schema_version != "2004 4th Edition":
+            errors.append("Manifest must use SCORM 2004 4th Edition for the K12Online preset.")
+        manifest_references: set[str] = set()
         for node in root.iter():
             href = node.attrib.get("href")
-            if href and (href.startswith(("/", "file:", "http:")) or ".." in href):
+            if href:
+                manifest_references.add(href)
+            if href and ("\\" in href or href.startswith(("/", "//")) or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", href) or any(part in {"", ".", ".."} for part in href.split("/"))):
                 errors.append(f"Unsafe manifest reference: {href}.")
             if href and href not in files:
                 errors.append(f"Manifest reference is missing from ZIP: {href}.")
+        for required_reference in ("index.html", "runtime.js"):
+            if required_reference not in manifest_references:
+                errors.append(f"Manifest must reference {required_reference}.")
+        for asset_name in sorted(name for name in files if name.startswith("assets/")):
+            if asset_name not in manifest_references:
+                errors.append(f"Packaged asset is not referenced by manifest: {asset_name}.")
     except ElementTree.ParseError:
         errors.append("imsmanifest.xml is not valid XML.")
     if b"API_1484_11" not in files.get("runtime.js", b""):
         errors.append("SCORM 2004 runtime adapter is missing.")
     if b"runtime.js" not in files.get("index.html", b""):
         errors.append("Player does not reference runtime.js.")
+    return errors
+
+
+def validate_scorm_zip(package: bytes) -> list[str]:
+    """Validate the final ZIP container without extracting untrusted paths."""
+    errors: list[str] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(package)) as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos]
+            if len(names) != len(set(names)):
+                errors.append("ZIP contains duplicate file names.")
+            if "imsmanifest.xml" not in names:
+                errors.append("ZIP must contain imsmanifest.xml at the package root.")
+            for info in infos:
+                name = info.filename
+                if info.flag_bits & 0x1:
+                    errors.append(f"ZIP entry must not be encrypted: {name}.")
+                if not name or "\\" in name or name.startswith(("/", "//")) or re.match(r"^[A-Za-z]:", name) or any(part in {"", ".", ".."} for part in name.rstrip("/").split("/")):
+                    errors.append(f"Unsafe ZIP entry path: {name}.")
+    except (zipfile.BadZipFile, OSError):
+        errors.append("Generated package is not a readable ZIP archive.")
     return errors
 
 def runtime_js():
@@ -1970,6 +2010,9 @@ def export_scorm(req: ExportRequest, user: User = Depends(current_teacher), db: 
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", effective.title).strip("_") or "bai_giang"
     filename = f"{safe}_SCORM2004.zip"
     package = mem.getvalue()
+    zip_errors = validate_scorm_zip(package)
+    if zip_errors:
+        raise HTTPException(status_code=422, detail={"code": "SCORM_ZIP_INVALID", "errors": zip_errors})
     storage_key = f"users/{user.id}/exports/{__import__('uuid').uuid4()}-{filename}"
     storage.put(storage_key, package, "application/zip")
     record = ExportRecord(user_id=user.id, project_id=effective.project_id, filename=filename, storage_key=storage_key, byte_size=len(package), validation_json={"errors": [], "warnings": warnings})

@@ -60,5 +60,11 @@ Before export is downloadable, validate at least:
 - passing/completion values are in range
 - generated ZIP opens and has manifest at root
 
+Validation runs twice: first against the in-memory file map and manifest, then
+against the completed ZIP container. It rejects unsafe or Windows-style paths,
+absolute/protocol manifest references, duplicate ZIP names, encrypted entries,
+multiple SCO resources, a non-4th-Edition K12Online preset, missing references
+and packaged assets omitted from the manifest.
+
 ## Compatibility policy
 Do not claim full K12Online compatibility solely from static package checks. Maintain a manual test matrix against a real K12Online course and optionally SCORM Cloud after runtime changes.

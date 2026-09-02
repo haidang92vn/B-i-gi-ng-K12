@@ -251,6 +251,24 @@ class PrototypeTests(unittest.TestCase):
         self.assertTrue(any("Passing score" in error for error in errors))
         self.assertTrue(any("Unsafe manifest" in error for error in errors))
 
+    def test_scorm_validator_rejects_bad_k12_manifest_and_unlisted_assets(self):
+        manifest = self.module.scorm_manifest("Sai preset", ["assets/ok.png"]).replace("2004 4th Edition", "2004 3rd Edition").replace("</resources>", '<resource identifier="RES-2" type="webcontent" adlcp:scormType="sco" href="index.html"/></resources>')
+        files = {"imsmanifest.xml": manifest.encode(), "index.html": b'<script src="runtime.js"></script>', "runtime.js": self.module.runtime_js().encode(), "assets/ok.png": b"png", "assets/unlisted.png": b"png"}
+        errors = self.module.validate_scorm_package(files, passing_score=70, completion_percent=90)
+        self.assertTrue(any("exactly one" in error for error in errors))
+        self.assertTrue(any("4th Edition" in error for error in errors))
+        self.assertTrue(any("assets/unlisted.png" in error for error in errors))
+
+    def test_final_scorm_zip_validator_rejects_corrupt_nested_and_unsafe_archives(self):
+        self.assertTrue(any("readable ZIP" in error for error in self.module.validate_scorm_zip(b"not-a-zip")))
+        nested = io.BytesIO()
+        with zipfile.ZipFile(nested, "w") as package:
+            package.writestr("lesson/imsmanifest.xml", "<manifest/>")
+            package.writestr("../escape.txt", "bad")
+        errors = self.module.validate_scorm_zip(nested.getvalue())
+        self.assertTrue(any("package root" in error for error in errors))
+        self.assertTrue(any("Unsafe ZIP entry" in error for error in errors))
+
     def test_runtime_tracks_core_scorm_2004_fields(self):
         runtime = self.module.runtime_js()
         for token in ["API_1484_11", "Initialize", "SetValue", "Commit", "Terminate"]:

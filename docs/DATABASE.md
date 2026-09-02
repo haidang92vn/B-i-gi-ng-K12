@@ -30,6 +30,16 @@ prototype runs may use SQLite only; production must set `DATABASE_URL` to Postgr
 - created_at
 - user_agent/ip metadata only if justified and documented
 
+## oauth_identities
+- id
+- user_id
+- provider
+- subject (the stable provider-issued account identifier)
+- created_at / last_authenticated_at
+
+The `(provider, subject)` pair is unique. Google access/refresh/ID tokens are never persisted;
+the identity is established from a freshly verified Google OpenID Connect ID token.
+
 ## projects
 - id
 - owner_user_id

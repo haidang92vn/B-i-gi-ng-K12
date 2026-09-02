@@ -5,8 +5,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Stre
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Any, List, Literal, Optional
 from pathlib import Path
-from datetime import datetime
-import hashlib, io, os, zipfile, html, json, re
+from datetime import datetime, timezone
+import hashlib, hmac, io, os, secrets, zipfile, html, json, re
 from xml.etree import ElementTree
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -15,8 +15,9 @@ from sqlalchemy.orm import Session
 from prototype.course_models import Block, Course, Question, Slide, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
 from prototype.credentials import decrypt, encrypt
-from prototype.persistence import AICredential, AnalyticsImport, AuthSession, ExportRecord, GenerationRun, LearningAnalytics, MediaAsset, Project, ProjectShare, School, SchoolMembership, SharedQuestion, SourceMaterial, User, create_schema, make_session_factory
+from prototype.persistence import AICredential, AnalyticsImport, AuthSession, ExportRecord, GenerationRun, LearningAnalytics, MediaAsset, OAuthIdentity, Project, ProjectShare, School, SchoolMembership, SharedQuestion, SourceMaterial, User, create_schema, make_session_factory
 from prototype.analytics import AnalyticsImportError, aggregate_events, aggregate_insights, normalize_rows, parse_report
+from prototype.google_oauth import GOOGLE_ATTEMPT_COOKIE, GOOGLE_ATTEMPT_MAX_AGE, GoogleOAuthError, authorization_url, config_from_env, decode_attempt, encode_attempt, exchange_code, new_attempt
 from prototype.providers import ProviderError, ProviderResult, media_provider_for, provider_for
 from prototype.media import SCORM_VIDEO_WARNING_BYTES, extension_for_mime, validate_media_upload, validate_media_url
 from prototype.sources import extract_text, validate_upload
@@ -363,6 +364,28 @@ def analytics_summary_for_school(db: Session, school_id: str) -> dict[str, Any]:
     return aggregate_events(events)
 
 
+def bootstrap_google_school_admin(db: Session, user: User) -> None:
+    """Assign the explicitly configured first Google account as school admin, once verified."""
+    admin_email = normalise_email(os.getenv("GOOGLE_BOOTSTRAP_ADMIN_EMAIL", ""))
+    school_name = " ".join(os.getenv("GOOGLE_BOOTSTRAP_SCHOOL_NAME", "").split())
+    if not admin_email and not school_name:
+        return
+    if not admin_email or not school_name:
+        raise HTTPException(status_code=503, detail="Google administrator bootstrap configuration is incomplete.")
+    if not hmac.compare_digest(user.email, admin_email):
+        return
+    school = db.scalar(select(School).where(School.name == school_name))
+    if school is None:
+        school = School(name=school_name, created_by_user_id=user.id)
+        db.add(school)
+        db.flush()
+    membership = membership_for(db, school.id, user.id)
+    if membership is None:
+        db.add(SchoolMembership(school_id=school.id, user_id=user.id, role="school_admin"))
+    else:
+        membership.role = "school_admin"
+
+
 def cleaned_learning_objectives(values: list[str]) -> list[str]:
     cleaned = [" ".join(value.split()) for value in values if value and value.strip()]
     if not cleaned:
@@ -451,6 +474,84 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
     db.refresh(user)
     set_session_cookie(response, token)
     return serialize_teacher(user)
+
+
+@app.get("/api/v1/auth/google/start")
+def start_google_login():
+    try:
+        config = config_from_env()
+        attempt = new_attempt()
+        response = RedirectResponse(authorization_url(config, attempt), status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        response.set_cookie(
+            GOOGLE_ATTEMPT_COOKIE,
+            encode_attempt(attempt),
+            httponly=True,
+            secure=os.getenv("APP_ENV", "development").lower() in {"production", "prod"},
+            samesite="lax",
+            max_age=GOOGLE_ATTEMPT_MAX_AGE,
+            path="/api/v1/auth/google",
+        )
+        return response
+    except GoogleOAuthError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/auth/google/callback")
+def finish_google_login(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    attempt_cookie: str | None = Cookie(default=None, alias=GOOGLE_ATTEMPT_COOKIE),
+    db: Session = Depends(get_db),
+):
+    response = RedirectResponse("/?auth_error=google", status_code=status.HTTP_303_SEE_OTHER)
+    response.delete_cookie(GOOGLE_ATTEMPT_COOKIE, path="/api/v1/auth/google")
+    if error or not code or not state:
+        return response
+    try:
+        config = config_from_env()
+        attempt = decode_attempt(attempt_cookie)
+        if not hmac.compare_digest(state, attempt.state):
+            raise GoogleOAuthError("Google sign-in state did not match.")
+        profile = exchange_code(config, attempt, code)
+    except GoogleOAuthError:
+        return response
+
+    identity = db.scalar(select(OAuthIdentity).where(OAuthIdentity.provider == "google", OAuthIdentity.subject == profile.subject))
+    if identity is not None:
+        user = db.get(User, identity.user_id)
+        if user is None or user.status != "active":
+            return response
+        identity.last_authenticated_at = datetime.now(timezone.utc)
+    else:
+        user = db.scalar(select(User).where(User.email == profile.email))
+        if user is None:
+            # A random unusable local-password hash satisfies the existing account model. Google is
+            # the only credential for this account; no provider token is persisted.
+            user = User(
+                email=profile.email,
+                password_hash=password_hasher.hash(secrets.token_urlsafe(48)),
+                full_name=profile.full_name,
+                status="active",
+            )
+            db.add(user)
+            db.flush()
+        elif user.status != "active":
+            return response
+        identity = OAuthIdentity(user_id=user.id, provider="google", subject=profile.subject)
+        db.add(identity)
+    bootstrap_google_school_admin(db, user)
+    user.last_login_at = datetime.now(timezone.utc)
+    token = new_session(db, user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return response
+    response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    response.delete_cookie(GOOGLE_ATTEMPT_COOKIE, path="/api/v1/auth/google")
+    set_session_cookie(response, token)
+    return response
 
 
 @app.post("/api/v1/auth/login", response_model=TeacherResponse)

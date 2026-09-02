@@ -174,6 +174,13 @@ It runs only after PostgreSQL migration, reads the initial password from an ephe
 variable, and never logs or resets a pre-existing password. Follow
 [docs/ONBOARDING_TRAN_QUOC_TOAN.md](docs/ONBOARDING_TRAN_QUOC_TOAN.md) on the approved VPS.
 
+## Google sign-in
+
+The login screen supports an optional **Đăng nhập với Google** flow. It signs in/registers users
+from a backend-verified Google identity; it does not accept a Gmail password. The first verified
+administrator can be bootstrap-configured only in VPS environment variables. See
+[docs/GOOGLE_SIGN_IN.md](docs/GOOGLE_SIGN_IN.md).
+
 ## Cấu trúc repository thực tế
 
 ```text

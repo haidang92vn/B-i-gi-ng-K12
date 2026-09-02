@@ -12,6 +12,11 @@
 - Use short-lived access tokens and revocable refresh/session tokens.
 - Add rate limiting to login, password reset and AI-generation endpoints.
 
+Google sign-in uses an authorization-code server flow with PKCE, state, nonce and backend ID-token
+signature/issuer/audience/expiry verification. The application never accepts a Gmail password and
+never stores Google tokens. Google bootstrap admin assignment must compare the verified email with
+an exact VPS-only configuration value; see `docs/GOOGLE_SIGN_IN.md`.
+
 ## Authorization
 Every project/file/export/credential endpoint must verify ownership or authorized membership server-side. Never trust a user_id supplied by the browser.
 

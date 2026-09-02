@@ -56,7 +56,7 @@ curl -fsS https://YOUR_DOMAIN/healthz
 curl -fsS https://YOUR_DOMAIN/readyz
 ```
 
-The provisioning command refuses to run unless Alembic is at `20260902_15`. It is idempotent:
+The provisioning command refuses to run unless Alembic is at `20260902_16`. It is idempotent:
 re-running it preserves an existing user's password and ensures that user has `school_admin` for
 this school. It prints only school/admin IDs, school name and email—never the password. A failed
 command must be investigated before retrying; do not bypass the migration check.

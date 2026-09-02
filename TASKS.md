@@ -152,3 +152,8 @@ Acceptance:
 - [x] Add idempotent first-school administrator provisioning after migration.
 - [x] Prepare VPS secret, migration, administrator and report-import acceptance checklist for Trường Tiểu học Trần Quốc Toản.
 - [ ] Execute the runbook with an authorized administrator email/password and an approved VPS operator.
+
+## Milestone 12.7 — Google sign-in [P1]
+- [x] Add Google OpenID Connect server flow with PKCE, state/nonce and verified identity binding.
+- [x] Add exact-email first administrator bootstrap for Trường Tiểu học Trần Quốc Toản.
+- [ ] Configure the Google Cloud consent screen, OAuth client and exact production callback URI on the approved domain.

@@ -7,9 +7,10 @@ const authForm = document.getElementById('authForm');
 const authEmailInput = document.getElementById('authEmail');
 const authPasswordInput = document.getElementById('authPassword');
 const authMessage = document.getElementById('authMessage');
-async function ensureAuth(){const r=await fetch('/api/v1/me');if(r.ok)authGate.classList.add('hidden');}
+async function ensureAuth(){const r=await fetch('/api/v1/me');if(r.ok)authGate.classList.add('hidden');else if(new URLSearchParams(location.search).get('auth_error')==='google')authMessage.textContent='Không thể đăng nhập Google. Hãy thử lại hoặc dùng email/mật khẩu.';}
 async function apiMessage(response){try{const body=await response.json();return typeof body.detail==='string'?body.detail:'';}catch{return '';}}
 authForm.onsubmit=async e=>{e.preventDefault();const email=authEmailInput.value.trim(),password=authPasswordInput.value;if(password.length<12){authMessage.textContent='Mật khẩu cần tối thiểu 12 ký tự.';return;}authMessage.textContent='Đang xác thực…';const body=JSON.stringify({email,password});let r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body});if(r.ok){authGate.classList.add('hidden');return;}if(r.status!==401){authMessage.textContent=(await apiMessage(r))||'Không thể kết nối máy chủ. Vui lòng thử lại.';return;}r=await fetch('/api/v1/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body});if(r.ok){authGate.classList.add('hidden');return;}if(r.status===409){authMessage.textContent='Email này đã được đăng ký; vui lòng kiểm tra lại mật khẩu.';return;}authMessage.textContent=(await apiMessage(r))||'Không thể tạo tài khoản. Vui lòng thử lại.';};ensureAuth();
+document.getElementById('googleLoginBtn').onclick=()=>{location.assign('/api/v1/auth/google/start');};
 const accessLabels={owner:'Chủ sở hữu',editor:'Có thể chỉnh sửa',viewer:'Chỉ xem'};
 function canEditProject(){return !state.project||state.project.access_level!=='viewer';}
 function applyProjectAccess(){const viewer=!canEditProject();[lessonTitle,sourceText,sourceFile,generationProvider,generationCredential,document.getElementById('generateBtn'),document.getElementById('selectAll')].forEach(el=>{if(el)el.disabled=viewer;});document.querySelectorAll('.direction-card').forEach(card=>card.classList.toggle('disabled',viewer));}

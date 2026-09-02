@@ -18,6 +18,7 @@ from prototype.quiz_scoring import score_question
 from prototype.scorm_runtime import FakeScorm2004API, ScormRuntime
 from prototype.logging_config import redact
 from prototype.onboarding import ProvisioningError, provision_school_admin
+from prototype.google_oauth import GoogleProfile, decode_attempt
 from prototype.persistence import database_url
 from prototype.quality import analyze_course
 
@@ -525,6 +526,38 @@ class PrototypeTests(unittest.TestCase):
                 provision_school_admin(
                     db, school_name=school_name, admin_email="invalid", admin_password="short",
                 )
+
+    def test_google_sign_in_creates_verified_identity_and_bootstraps_configured_admin(self):
+        client = TestClient(self.module.app)
+        email = f"google-admin-{uuid4()}@example.test"
+        school_name = f"Trường Tiểu học Trần Quốc Toản {uuid4()}"
+        environment = {
+            "GOOGLE_OAUTH_CLIENT_ID": "test-client.apps.googleusercontent.com",
+            "GOOGLE_OAUTH_CLIENT_SECRET": "test-secret-not-a-real-secret",
+            "GOOGLE_OAUTH_REDIRECT_URI": "http://127.0.0.1:8000/api/v1/auth/google/callback",
+            "GOOGLE_BOOTSTRAP_ADMIN_EMAIL": email,
+            "GOOGLE_BOOTSTRAP_SCHOOL_NAME": school_name,
+        }
+        with patch.dict(os.environ, environment, clear=False), patch.object(
+            self.module, "exchange_code", return_value=GoogleProfile(subject="google-subject-123", email=email, full_name="Google Admin"),
+        ):
+            start = client.get("/api/v1/auth/google/start", follow_redirects=False)
+            self.assertEqual(start.status_code, 307, start.text)
+            self.assertIn("code_challenge_method=S256", start.headers["location"])
+            attempt = decode_attempt(client.cookies.get("google_oauth_attempt"))
+            callback = client.get(f"/api/v1/auth/google/callback?code=one-time-code&state={attempt.state}", follow_redirects=False)
+            self.assertEqual(callback.status_code, 303, callback.text)
+            self.assertEqual(callback.headers["location"], "/")
+            me = client.get("/api/v1/me")
+            self.assertEqual(me.status_code, 200, me.text)
+            self.assertEqual(me.json()["email"], email)
+            schools = client.get("/api/v1/schools").json()
+            self.assertEqual(schools[0]["name"], school_name)
+            self.assertEqual(schools[0]["role"], "school_admin")
+            self.assertEqual(client.get("/api/v1/auth/google/callback?code=x&state=wrong", follow_redirects=False).headers["location"], "/?auth_error=google")
+            with self.module.SessionLocal() as db:
+                identities = db.scalars(self.module.select(self.module.OAuthIdentity).where(self.module.OAuthIdentity.provider == "google", self.module.OAuthIdentity.subject == "google-subject-123")).all()
+                self.assertEqual(len(identities), 1)
 
 
 if __name__ == "__main__":

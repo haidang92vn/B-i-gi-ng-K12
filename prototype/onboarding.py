@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from prototype.auth import normalise_email, password_hasher
 from prototype.persistence import School, SchoolMembership, User, make_session_factory
 
-EXPECTED_ALEMBIC_REVISION = "20260902_15"
+EXPECTED_ALEMBIC_REVISION = "20260902_16"
 
 
 class ProvisioningError(ValueError):

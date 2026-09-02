@@ -162,3 +162,17 @@ Acceptance:
 - [x] Allow a teacher to start at Step 1 by selecting a source file; create a canonical draft project automatically.
 - [x] Apply AI-generated content to that same draft project instead of creating a duplicate lesson.
 - [x] Preserve generation-run linkage when the AI populates a pre-existing draft.
+
+## Milestone 13 — Incremental Next.js frontend migration [P1]
+- [x] Scaffold a strict Next.js 16 + TypeScript application without removing the FastAPI prototype.
+- [x] Reuse backend-owned HttpOnly authentication, Google sign-in and the `/api/*` contract through a same-origin proxy.
+- [x] Provide a responsive shell in which the existing eight-step teacher workflow remains recognizable.
+- [x] Add the Step 1 source/title surface while clearly marking it as not yet persisted.
+- [ ] Connect Step 1 to canonical draft creation and source upload, then verify refresh/reopen behavior.
+- [ ] Migrate Steps 2–8 incrementally; remove a prototype screen only after its replacement passes acceptance tests.
+
+Acceptance for this first slice:
+- Next.js production build and strict TypeScript check pass;
+- unauthenticated `/api/v1/me` reaches FastAPI through the frontend proxy and returns `401`;
+- the FastAPI prototype and existing automated suite remain functional;
+- no credential is stored in browser JavaScript or committed configuration.

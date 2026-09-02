@@ -68,6 +68,21 @@ Mở `http://127.0.0.1:8000`.
 Prototype hiện hỗ trợ mock AI, duyệt nội dung, chọn dạng Quiz, preview và tạo gói SCORM
 2004 cơ bản. Chi tiết những gì chưa có xem `STATUS.md`.
 
+## Chạy frontend Next.js đang chuyển đổi
+
+Giữ FastAPI chạy ở cổng `8000`, sau đó mở terminal thứ hai:
+
+```powershell
+cd frontend
+pnpm install
+pnpm dev
+```
+
+Mở `http://127.0.0.1:3000`. Frontend chuyển tiếp cùng nguồn các yêu cầu `/api/*` đến FastAPI,
+vì vậy cookie phiên HttpOnly không cần đưa vào JavaScript. Hiện phần đăng nhập và khung 8 bước
+đã có; màn hình prototype vẫn là phương án sử dụng ổn định cho các bước chưa được chuyển đổi.
+Xem [docs/FRONTEND_MIGRATION.md](docs/FRONTEND_MIGRATION.md).
+
 ## Milestone 01: canonical course + persistence
 
 Prototype tự tạo một SQLite database cục bộ trong `prototype/storage/` để demo. Mỗi lần
@@ -122,8 +137,9 @@ The repository now includes `docker-compose.yml`, Caddy HTTPS configuration, exp
 migrations, health/readiness checks, secret-redacted JSON logs and a daily encrypted PostgreSQL
 backup service to a separate Cloudflare R2 bucket. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for
 the VPS release procedure and [docs/RESTORE_DRILL.md](docs/RESTORE_DRILL.md) for the required
-quarterly recovery drill. This ships the current FastAPI-served prototype UI; a production Next.js
-frontend and actual background-job handlers remain separate work.
+quarterly recovery drill. This ships the current FastAPI-served prototype UI. The Next.js
+migration has started with authentication and the eight-step shell; remaining workflow screens
+and actual background-job handlers remain separate work.
 
 ## Milestone 12.1: quality checks
 
@@ -211,6 +227,7 @@ schemas/course.schema.json       JSON Schema của course.json
 examples/course.example.json     Course JSON mẫu hợp lệ
 prompts/                         Prompt theo từng milestone
 prototype/                       FastAPI web app demo chạy được
+frontend/                        Next.js + TypeScript migration (incremental)
 tests/test_starter.py            Smoke tests của starter/prototype
 ```
 

@@ -92,7 +92,7 @@ describe("Canonical project API", () => {
         revision: 1,
         objectives: [{ id: "o1", text: "Mục tiêu" }],
         slides: [{ id: "s1", title: "Slide", layout: "content", status: "ai_draft", blocks: [{ id: "b1", type: "text", text: "Nội dung", settings: {} }] }],
-        question_bank: [{ id: "q1", question: "Câu hỏi" }],
+        question_bank: [{ id: "q1", type: "single", question: "Câu hỏi", selected: true, score: 1, difficulty: "recognize", correct_answer: "A", options: ["A", "B"], objective_ids: ["o1"], settings: {} }],
       },
       objectives: ["Mục tiêu"],
       sections: [{ id: "s1", title: "Slide", content: "Nội dung", note: "" }],

@@ -80,8 +80,8 @@ pnpm dev
 
 Mở `http://127.0.0.1:3000`. Frontend chuyển tiếp cùng nguồn các yêu cầu `/api/*` đến FastAPI,
 vì vậy cookie phiên HttpOnly không cần đưa vào JavaScript. Hiện phần đăng nhập, khung 8 bước,
-Bước 1 lưu/khôi phục học liệu, Bước 2 lưu định hướng, Bước 3 tạo nội dung AI vào đúng dự án đã có
-và Bước 4 cho giáo viên duyệt/chỉnh sửa với autosave;
+Bước 1 lưu/khôi phục học liệu, Bước 2 lưu định hướng, Bước 3 tạo nội dung AI vào đúng dự án đã có,
+Bước 4 cho giáo viên duyệt/chỉnh sửa và Bước 5 biên tập ngân hàng câu hỏi với autosave;
 màn hình prototype vẫn là
 phương án sử dụng ổn định cho các bước chưa được chuyển đổi.
 Xem [docs/FRONTEND_MIGRATION.md](docs/FRONTEND_MIGRATION.md).

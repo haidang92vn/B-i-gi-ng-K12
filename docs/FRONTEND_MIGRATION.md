@@ -19,6 +19,8 @@ Included now:
 - schema-validated AI output populated into the same canonical draft with generation-run linkage;
 - Step 4 objective/slide review, status management and debounced canonical autosave;
 - add, duplicate, reorder and delete slide operations plus targeted regeneration of unapproved slides;
+- Step 5 question-bank filtering, selection and full canonical quiz-field editing;
+- structured authoring for matching, ordering, drag/drop and asset-backed image interactions;
 - a same-origin `/api/*` rewrite to FastAPI.
 
 The browser never receives stored teacher AI credentials. `course.json` remains canonical and no
@@ -90,6 +92,15 @@ before the editor replaces local values with the newest server version. Targeted
 Step 3 provider, waits for autosave and relies on the backend guard that refuses to overwrite an
 approved slide. Non-text media blocks remain intact during text edits.
 
-The next slice implements Step 5 question-bank selection and editing in Next.js, including quiz
-type, score, difficulty, answer, feedback and learning-objective links while keeping deterministic
-scoring and all unselected questions in canonical `course.json`.
+Step 5 now separates selecting a question from deleting it: unselected questions remain in the
+canonical bank and can be filtered or reused. The editor covers all eight supported interaction
+types, score, difficulty, options, structured correct answers, explanation, feedback and learning-
+objective links. Matching pairs, ordered/drag-drop sequences and image-option asset references have
+teacher-readable line formats that convert to the existing canonical structures without changing
+the deterministic backend scoring rules. Per-question warnings identify missing stems, answers,
+options, scores and objective links. Autosave and conflict recovery use the same guarded revision
+workflow as Step 4.
+
+The next slice implements Step 6 HTML5 lesson building and preview in Next.js. It will render from
+the saved canonical project through the backend player and migrate the related media/TTS preview,
+rights confirmation and slide-attachment workflow without persisting generated HTML as source.

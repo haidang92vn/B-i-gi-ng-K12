@@ -26,6 +26,25 @@ export type CourseSlide = {
   speaker_notes?: string | null;
 };
 
+export type QuestionType = "single" | "multiple" | "truefalse" | "fill" | "matching" | "ordering" | "dragdrop" | "image";
+export type QuestionDifficulty = "recognize" | "understand" | "apply" | "advanced";
+
+export type CourseQuestion = {
+  id: string;
+  type: QuestionType;
+  question: string;
+  selected: boolean;
+  score: number;
+  difficulty: QuestionDifficulty;
+  correct_answer: unknown;
+  options: string[];
+  explanation?: string | null;
+  feedback_correct?: string | null;
+  feedback_incorrect?: string | null;
+  objective_ids: string[];
+  settings: Record<string, unknown>;
+};
+
 export type CanonicalCourse = {
   id: string;
   revision: number;
@@ -36,7 +55,7 @@ export type CanonicalCourse = {
   };
   objectives: Array<{ id: string; text: string }>;
   slides: CourseSlide[];
-  question_bank: Array<{ id: string; question: string; [key: string]: unknown }>;
+  question_bank: CourseQuestion[];
   [key: string]: unknown;
 };
 

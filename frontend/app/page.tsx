@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import CourseEditor from "@/app/course-editor";
+import QuizEditor from "@/app/quiz-editor";
 import {
   authenticate,
   createProject,
@@ -115,6 +116,8 @@ export default function Home() {
   const [generationResult, setGenerationResult] = useState<{ provider: string; model?: string; objectives: number; slides: number; questions: number; retries?: number } | null>(null);
   const [reviewState, setReviewState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa duyệt" });
   const [reviewSaved, setReviewSaved] = useState(true);
+  const [quizState, setQuizState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa chọn quiz" });
+  const [quizSaved, setQuizSaved] = useState(true);
 
   useEffect(() => {
     currentTeacher().then(setTeacher).catch(() => setTeacher(null));
@@ -146,6 +149,8 @@ export default function Home() {
           setGenerationResult({ provider: "Đã lưu", objectives: latest.course.objectives.length, slides: latest.course.slides.length, questions: latest.course.question_bank.length });
           setReviewState({ tone: "saved", message: `Sẵn sàng duyệt • bản ${latest.revision}` });
           setReviewSaved(true);
+          setQuizState({ tone: "saved", message: `${latest.course.question_bank.filter((question) => question.selected).length} câu đang chọn` });
+          setQuizSaved(true);
         }
       })
       .catch((reason) => {
@@ -322,6 +327,8 @@ export default function Home() {
       setGenerationState({ tone: "saved", message: `Đã lưu nội dung • bản ${updated.revision}` });
       setReviewState({ tone: "saved", message: `Sẵn sàng duyệt • bản ${updated.revision}` });
       setReviewSaved(true);
+      setQuizState({ tone: "saved", message: `${updated.course.question_bank.filter((question) => question.selected).length} câu đang chọn` });
+      setQuizSaved(true);
       return true;
     } catch (reason) {
       setGenerationState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể tạo nội dung bằng AI." });
@@ -334,6 +341,10 @@ export default function Home() {
   async function navigateToStep(number: number) {
     if (activeStep === 4 && number !== 4 && !reviewSaved) {
       setReviewState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi rời Bước 4." });
+      return;
+    }
+    if (activeStep === 5 && number !== 5 && !quizSaved) {
+      setQuizState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi rời Bước 5." });
       return;
     }
     if (number > 1 && activeStep === 1 && !(await saveDraft())) return;
@@ -358,6 +369,10 @@ export default function Home() {
       setActiveStep(5);
       return;
     }
+    if (number > 6 && activeStep === 5) {
+      setActiveStep(6);
+      return;
+    }
     setActiveStep(number);
   }
 
@@ -370,6 +385,10 @@ export default function Home() {
     }
     if (activeStep === 4 && !reviewSaved) {
       setReviewState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi tiếp tục." });
+      return;
+    }
+    if (activeStep === 5 && !quizSaved) {
+      setQuizState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi tiếp tục." });
       return;
     }
     setActiveStep((value) => Math.min(8, value + 1));
@@ -387,6 +406,8 @@ export default function Home() {
     setGenerationResult(null);
     setReviewState({ tone: "idle", message: "Chưa duyệt" });
     setReviewSaved(true);
+    setQuizState({ tone: "idle", message: "Chưa chọn quiz" });
+    setQuizSaved(true);
     setActiveStep(1);
   }
 
@@ -407,6 +428,8 @@ export default function Home() {
     setGenerationResult(null);
     setReviewState({ tone: "idle", message: "Chưa duyệt" });
     setReviewSaved(true);
+    setQuizState({ tone: "idle", message: "Chưa chọn quiz" });
+    setQuizSaved(true);
   }
 
   return (
@@ -544,12 +567,25 @@ export default function Home() {
                 onSaveState={(tone, message, saved) => { setReviewState({ tone, message }); setReviewSaved(saved); }}
               />
             </>
+          ) : activeStep === 5 && project ? (
+            <>
+              <div className="section-heading">
+                <div><span className="task-label">TASK 05</span><h2>Ngân hàng câu hỏi và chọn Quiz</h2><p>Chọn câu sẽ dùng, chỉnh cách chấm điểm và giữ các câu còn lại để tái sử dụng.</p></div>
+                <span className={`status-pill ${quizState.tone}`} role="status">{quizState.message}</span>
+              </div>
+              <QuizEditor
+                key={project.id}
+                project={project}
+                onProjectChange={setProject}
+                onSaveState={(tone, message, saved) => { setQuizState({ tone, message }); setQuizSaved(saved); }}
+              />
+            </>
           ) : (
             <div className="step-placeholder"><span>{String(activeStep).padStart(2, "0")}</span><h2>{steps[activeStep - 1][0]}</h2><p>Chức năng này tiếp tục dùng bản prototype ổn định và sẽ được chuyển sang TypeScript ở milestone kế tiếp.</p></div>
           )}
         </section>
 
-        <footer className="flow-footer"><button disabled={activeStep === 1} onClick={() => { void navigateToStep(Math.max(1, activeStep - 1)); }}>← Quay lại</button><span>Bước {activeStep}/8</span><button className="primary" disabled={busy || workspaceLoading || (activeStep === 4 && !reviewSaved)} onClick={() => { void advance(); }}>{activeStep === 8 ? "Hoàn tất" : activeStep <= 2 ? "Lưu & tiếp tục →" : "Tiếp tục →"}</button></footer>
+        <footer className="flow-footer"><button disabled={activeStep === 1} onClick={() => { void navigateToStep(Math.max(1, activeStep - 1)); }}>← Quay lại</button><span>Bước {activeStep}/8</span><button className="primary" disabled={busy || workspaceLoading || (activeStep === 4 && !reviewSaved) || (activeStep === 5 && !quizSaved)} onClick={() => { void advance(); }}>{activeStep === 8 ? "Hoàn tất" : activeStep <= 2 ? "Lưu & tiếp tục →" : "Tiếp tục →"}</button></footer>
       </main>
     </div>
   );

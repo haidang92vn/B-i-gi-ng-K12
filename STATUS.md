@@ -52,14 +52,16 @@ contracts for the production architecture. It is **not yet the complete producti
   selects Mock/OpenAI/Gemini, exposes only server-safe credential metadata, validates structured AI
   output and fills the same canonical project with objectives, slides and a question bank. Step 4
   edits objectives and slides, manages review states and slide order, autosaves with revision
-  protection and can regenerate one unapproved slide without touching its siblings. See
+  protection and can regenerate one unapproved slide without touching its siblings. Step 5 keeps
+  selected and unselected questions in the canonical bank while editing all quiz types, scores,
+  difficulty, structured answers, feedback and objective links with the same revision protection. See
   `docs/FRONTEND_MIGRATION.md`.
 
 ### Not implemented yet
 
 - Production PostgreSQL project library (the local prototype uses SQLite; deployment must run the Alembic migration against PostgreSQL).
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
-- Completion of the production Next.js frontend beyond authentication, Steps 1–4 and the workflow shell,
+- Completion of the production Next.js frontend beyond authentication, Steps 1–5 and the workflow shell,
   plus actual background-job handlers (the current Compose worker only validates Redis connectivity).
 - A real de-identified K12Online export/field dictionary, school retention approval and any official API/webhook specification. The generic report-import prototype must be mapped and accepted before live use; see `docs/ANALYTICS.md`.
 - Execution of the controlled Trường Tiểu học Trần Quốc Toản production runbook by the approved VPS operator and school administrator; see `docs/ONBOARDING_TRAN_QUOC_TOAN.md`.

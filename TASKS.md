@@ -172,6 +172,7 @@ Acceptance:
 - [x] Migrate Step 2 direction selection and persist it through optimistic canonical revision updates.
 - [x] Migrate Step 3 AI provider/credential selection and populate the same canonical draft.
 - [x] Migrate Step 4 teacher review with objective/slide editing, autosave and targeted regeneration.
+- [x] Migrate Step 5 question-bank selection and complete quiz authoring fields.
 - [ ] Migrate Steps 3–8 incrementally; remove a prototype screen only after its replacement passes acceptance tests.
 
 Acceptance for this first slice:

@@ -22,3 +22,7 @@ pnpm dev
 By default `/api/*` is proxied to `http://127.0.0.1:8000`. Set
 `FASTAPI_ORIGIN` when the backend runs elsewhere. For local Google OAuth, the
 configured callback must use the frontend origin and `/api/v1/auth/google/callback`.
+
+For Vercel production, set `FASTAPI_ORIGIN` to the public HTTPS VPS API in the
+Vercel Production environment. There is intentionally no production localhost fallback. See
+[`../docs/VERCEL_FRONTEND.md`](../docs/VERCEL_FRONTEND.md).

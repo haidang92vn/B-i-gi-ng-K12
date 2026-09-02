@@ -157,9 +157,9 @@ The repository now includes `docker-compose.yml`, Caddy HTTPS configuration, exp
 migrations, health/readiness checks, secret-redacted JSON logs and a daily encrypted PostgreSQL
 backup service to a separate Cloudflare R2 bucket. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for
 the VPS release procedure and [docs/RESTORE_DRILL.md](docs/RESTORE_DRILL.md) for the required
-quarterly recovery drill. This ships the current FastAPI-served prototype UI. The Next.js
-migration has started with authentication and the eight-step shell; remaining workflow screens
-and actual background-job handlers remain separate work.
+quarterly recovery drill. The completed Next.js frontend runs on Vercel while FastAPI remains on
+the VPS; see [docs/VERCEL_FRONTEND.md](docs/VERCEL_FRONTEND.md) for the required same-origin proxy,
+DNS and Google OAuth cutover. Actual background-job handlers remain separate work.
 
 ## Milestone 12.1: quality checks
 

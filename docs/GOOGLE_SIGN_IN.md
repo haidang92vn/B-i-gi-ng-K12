@@ -9,15 +9,16 @@ or Gmail password is persisted.
 
 1. In the school's Google Cloud project, configure the OAuth consent screen and create an OAuth
    client of type **Web application**.
-2. Add the exact production redirect URI:
-   `https://YOUR_DOMAIN/api/v1/auth/google/callback`. The scheme, host, path and trailing slash
+2. Add the exact production redirect URI on the **frontend** hostname:
+   `https://studio.YOUR_DOMAIN/api/v1/auth/google/callback`. With Vercel, this is the Vercel
+   production domain until a school domain is assigned. The scheme, host, path and trailing slash
    must exactly match the configured URI.
 3. Keep the Client ID and Client Secret in the VPS `.env` only:
 
    ```text
    GOOGLE_OAUTH_CLIENT_ID=...apps.googleusercontent.com
    GOOGLE_OAUTH_CLIENT_SECRET=...
-   GOOGLE_OAUTH_REDIRECT_URI=https://YOUR_DOMAIN/api/v1/auth/google/callback
+   GOOGLE_OAUTH_REDIRECT_URI=https://studio.YOUR_DOMAIN/api/v1/auth/google/callback
    ```
 
 4. For the first-school bootstrap only, set the exact verified Google email and the school name in

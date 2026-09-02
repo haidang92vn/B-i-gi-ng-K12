@@ -1,15 +1,16 @@
-# Production deployment (VPS + R2)
+# Production deployment (VPS API + Vercel frontend + R2)
 
 The repository now includes a Compose stack for an Ubuntu 22.04+ VPS in Singapore:
-`Caddy → FastAPI web/API + worker → PostgreSQL/Redis`, with Cloudflare R2 for all source files,
-SCORM exports and encrypted database backups. The current UI is served by FastAPI. A real Next.js
-frontend is still a later product refactor, so this configuration deliberately does not pretend a
-non-existent Next.js app is deployable.
+`Vercel Next.js frontend → Caddy → FastAPI API + worker → PostgreSQL/Redis`, with Cloudflare R2
+for all source files, SCORM exports and encrypted database backups. The frontend stays same-origin
+for browser API calls by using Vercel's server-side rewrite; the VPS does not expose PostgreSQL or
+Redis. See [VERCEL_FRONTEND.md](VERCEL_FRONTEND.md) for the two-hostname configuration.
 
 ## Before first deploy
 
-1. Point `APP_DOMAIN` to the VPS public IP in Cloudflare DNS. Permit inbound TCP 80 and 443;
-   do not expose PostgreSQL or Redis.
+1. Point the VPS API hostname (for example `api.example.edu.vn`) to the VPS public IP in Cloudflare
+   DNS, set it as `APP_DOMAIN`, and permit inbound TCP 80 and 443; do not expose PostgreSQL or Redis.
+   Configure the Vercel frontend hostname separately.
 2. Install Docker Engine and the Compose plugin, clone the trusted release, then copy
    `.env.example` to `.env`. Set `APP_ENV=production`, strong unique database/Redis/JWT secrets,
    a Fernet `CREDENTIAL_ENCRYPTION_KEY`, R2 application credentials, and a separate backup R2

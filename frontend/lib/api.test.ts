@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createProject, updateProjectDirection, updateProjectTitle, uploadProjectSource, type Project } from "./api";
+import {
+  createProject,
+  generateCourse,
+  populateProjectFromGeneration,
+  updateProjectDirection,
+  updateProjectTitle,
+  uploadProjectSource,
+  type GenerationResponse,
+  type Project,
+} from "./api";
 
 const project: Project = {
   id: "course-1",
@@ -70,5 +79,39 @@ describe("Canonical project API", () => {
     expect(request.method).toBe("POST");
     expect(request.headers).toBeUndefined();
     expect(request.body).toBeInstanceOf(FormData);
+  });
+
+  it("sends only a credential id to AI generation and keeps the same project id", async () => {
+    const generated: GenerationResponse = {
+      course: {
+        ...project.course,
+        id: "temporary-ai-id",
+        revision: 1,
+        objectives: [{ id: "o1", text: "Mục tiêu" }],
+        slides: [{ id: "s1", title: "Slide", status: "ai_draft" }],
+        question_bank: [{ id: "q1", question: "Câu hỏi" }],
+      },
+      objectives: ["Mục tiêu"],
+      sections: [{ id: "s1", title: "Slide", content: "Nội dung", note: "" }],
+      quizzes: [{ id: "q1", question: "Câu hỏi", quiz_type: "single", selected: true }],
+      notice: "Cần duyệt",
+      generation: { id: "run-1", provider: "openai", model: "gpt-test", retries: 0 },
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(generated), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...project, revision: 4 }), { status: 200 }));
+
+    const response = await generateCourse({ title: "Bài cũ", source: "Nội dung nguồn", direction: "lesson", provider: "openai", credentialId: "credential-1" });
+    await populateProjectFromGeneration(project, response);
+
+    const generationBody = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(generationBody.credential_id).toBe("credential-1");
+    expect(JSON.stringify(generationBody)).not.toContain("secret");
+    const patchBody = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
+    expect(patchBody.expected_revision).toBe(3);
+    expect(patchBody.course.id).toBe("course-1");
+    expect(patchBody.course.revision).toBe(4);
+    expect(patchBody.course.metadata.direction).toBe("lesson");
+    expect(patchBody.generation_id).toBe("run-1");
   });
 });

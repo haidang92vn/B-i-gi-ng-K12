@@ -1,8 +1,10 @@
 # Next.js frontend
 
 This directory is the incremental production frontend. Authentication and Steps
-1–2 now use the FastAPI APIs for canonical draft, source and direction
-persistence. The FastAPI prototype remains available until each remaining
+1–3 now use the FastAPI APIs for canonical draft, source, direction and structured
+AI generation persistence. Step 3 keeps Mock AI as the free default, selects only
+server-safe metadata for saved OpenAI/Gemini credentials and populates the same
+canonical project. The FastAPI prototype remains available until each remaining
 workflow step has a tested Next.js replacement.
 
 ```powershell

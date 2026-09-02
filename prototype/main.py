@@ -889,11 +889,11 @@ def delete_credential(credential_id: str, user: User = Depends(current_teacher),
     item.status = "revoked"; db.commit()
 
 class GenerateRequest(BaseModel):
-    title: str
-    source: str
+    title: str = Field(min_length=1, max_length=300)
+    source: str = Field(min_length=1, max_length=24000)
     direction: Literal["lesson", "review", "advanced"] = "lesson"
     provider: Literal["mock", "openai", "gemini"] = "mock"
-    credential_id: str | None = None
+    credential_id: str | None = Field(default=None, max_length=36)
 
 
 class RegenerateSlideRequest(BaseModel):

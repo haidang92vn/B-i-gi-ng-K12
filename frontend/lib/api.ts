@@ -6,6 +6,7 @@ export type Teacher = {
 };
 
 export type WorkflowDirection = "lesson" | "review" | "advanced";
+export type AIProvider = "mock" | "openai" | "gemini";
 
 export type CanonicalCourse = {
   id: string;
@@ -15,6 +16,9 @@ export type CanonicalCourse = {
     direction: WorkflowDirection;
     [key: string]: unknown;
   };
+  objectives: Array<{ id: string; text: string }>;
+  slides: Array<{ id: string; title: string; status: "ai_draft" | "edited" | "approved"; [key: string]: unknown }>;
+  question_bank: Array<{ id: string; question: string; [key: string]: unknown }>;
   [key: string]: unknown;
 };
 
@@ -34,6 +38,32 @@ export type SourceMaterial = {
   byte_size: number;
   extracted_text: string | null;
   created_at: string | null;
+};
+
+export type AICredential = {
+  id: string;
+  provider: "openai" | "gemini";
+  label: string | null;
+  secret_last4: string;
+  model_default: string | null;
+  status: string;
+};
+
+export type GenerationResponse = {
+  course: CanonicalCourse;
+  objectives: string[];
+  sections: Array<{ id: string; title: string; content: string; note: string }>;
+  quizzes: Array<{ id: string; question: string; quiz_type: string; selected: boolean }>;
+  notice: string;
+  generation: {
+    id: string;
+    provider: AIProvider;
+    model?: string;
+    retries: number;
+    request_id?: string;
+    input_tokens?: number;
+    output_tokens?: number;
+  };
 };
 
 async function message(response: Response) {
@@ -136,4 +166,54 @@ export async function uploadProjectSource(projectId: string, file: File): Promis
   });
   if (!response.ok) throw new Error((await message(response)) || "Không thể tải học liệu.");
   return response.json() as Promise<SourceMaterial>;
+}
+
+export async function listAICredentials(): Promise<AICredential[]> {
+  const response = await fetch("/api/v1/ai/credentials", { credentials: "include" });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tải danh sách API key.");
+  return response.json() as Promise<AICredential[]>;
+}
+
+export async function generateCourse(input: {
+  title: string;
+  source: string;
+  direction: WorkflowDirection;
+  provider: AIProvider;
+  credentialId?: string;
+}): Promise<GenerationResponse> {
+  const response = await fetch("/api/generate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: input.title,
+      source: input.source.slice(0, 24000),
+      direction: input.direction,
+      provider: input.provider,
+      credential_id: input.provider === "mock" ? null : input.credentialId || null,
+    }),
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tạo nội dung bằng AI.");
+  return response.json() as Promise<GenerationResponse>;
+}
+
+export async function populateProjectFromGeneration(project: Project, generated: GenerationResponse): Promise<Project> {
+  const course: CanonicalCourse = {
+    ...generated.course,
+    id: project.id,
+    revision: project.revision + 1,
+    metadata: {
+      ...generated.course.metadata,
+      title: project.title,
+      direction: project.course.metadata.direction,
+    },
+  };
+  const response = await fetch(`/api/v1/projects/${project.id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_revision: project.revision, course, generation_id: generated.generation.id }),
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể lưu nội dung AI vào bản nháp hiện tại.");
+  return response.json() as Promise<Project>;
 }

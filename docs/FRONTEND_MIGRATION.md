@@ -15,6 +15,8 @@ Included now:
 - canonical draft creation, optimistic title revision updates and source persistence;
 - automatic restore of the latest active owned draft and its newest extracted source;
 - Step 2 direction selection persisted through an optimistic canonical revision update;
+- Step 3 Mock/OpenAI/Gemini selection, server-owned credential metadata and structured generation;
+- schema-validated AI output populated into the same canonical draft with generation-run linkage;
 - a same-origin `/api/*` rewrite to FastAPI.
 
 The browser never receives stored teacher AI credentials. `course.json` remains canonical and no
@@ -69,6 +71,14 @@ Step 2 now offers lesson, review and advanced directions. Saving changes only
 `course.metadata.direction` and `course.revision`; it preserves title, source history and all other
 canonical fields. A revision conflict is shown instead of silently overwriting another session.
 
-The next slice implements Step 3 AI generation. Acceptance requires provider/credential selection,
-generation from the newest saved source and populating the same project id instead of creating a
-duplicate lesson. Provider errors and invalid structured output must remain recoverable.
+Step 3 now generates from the extracted source restored from the newest saved material. Mock AI is
+the no-cost default; OpenAI and Gemini can only use an active credential ID returned by the backend.
+The browser never receives or submits the stored secret. Generated data is schema-validated by
+FastAPI, assigned the existing project ID and next optimistic revision, and linked to its generation
+run. A provider/schema/network failure leaves the saved source and direction intact so the teacher
+can retry. Existing generated slides are not overwritten from this screen; the teacher continues to
+review and edit them at Step 4.
+
+The next slice implements Step 4 teacher review: edit objectives and slides, manage draft/edited/
+approved status, preserve unsaved values on conflicts and expose targeted regeneration without
+overwriting approved content.

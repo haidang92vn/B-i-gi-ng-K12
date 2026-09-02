@@ -363,6 +363,8 @@ class PrototypeTests(unittest.TestCase):
         mock_generated = client.post("/api/generate", json={"title": title, "source": "Nội dung kiểm thử. Có ví dụ.", "provider": "mock"})
         self.assertEqual(mock_generated.status_code, 200, mock_generated.text)
         self.assertIn("course", mock_generated.json())
+        invalid_generation = client.post("/api/generate", json={"title": title, "source": "", "provider": "mock"})
+        self.assertEqual(invalid_generation.status_code, 422, invalid_generation.text)
 
         request = self.module.GenerateRequest(title=title, source="Nguồn kiểm thử có đủ ngữ cảnh.", provider="openai")
         attempts = [{"unexpected": "shape"}, self.module.make_mock_content(request)["course"]]

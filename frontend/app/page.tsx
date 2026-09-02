@@ -5,12 +5,18 @@ import {
   authenticate,
   createProject,
   currentTeacher,
+  generateCourse,
+  listAICredentials,
   listProjects,
   listProjectSources,
+  populateProjectFromGeneration,
   signOut,
   updateProjectDirection,
   updateProjectTitle,
   uploadProjectSource,
+  type AICredential,
+  type AIProvider,
+  type GenerationResponse,
   type Project,
   type SourceMaterial,
   type Teacher,
@@ -40,6 +46,12 @@ const directionOptions: Array<{
   { id: "lesson", title: "Bài học mới", summary: "Giải thích kiến thức theo tiến trình rõ ràng, có ví dụ và luyện tập.", outcome: "Mục tiêu → kiến thức → ví dụ → luyện tập" },
   { id: "review", title: "Ôn tập – củng cố", summary: "Hệ thống hóa nội dung đã học và ưu tiên câu hỏi kiểm tra nhanh.", outcome: "Tóm tắt → ghi nhớ → luyện tập → phản hồi" },
   { id: "advanced", title: "Nâng cao – mở rộng", summary: "Tạo tình huống vận dụng, so sánh và câu hỏi tư duy ở mức cao hơn.", outcome: "Khám phá → vận dụng → thử thách → mở rộng" },
+];
+
+const providerOptions: Array<{ id: AIProvider; title: string; badge: string; summary: string }> = [
+  { id: "mock", title: "Mock AI", badge: "Miễn phí", summary: "Tạo dữ liệu demo ổn định, không gửi nội dung ra dịch vụ bên ngoài." },
+  { id: "openai", title: "ChatGPT / OpenAI", badge: "API cá nhân", summary: "Dùng khóa OpenAI đã được mã hóa và lưu ở phía máy chủ." },
+  { id: "gemini", title: "Google Gemini", badge: "API cá nhân", summary: "Dùng khóa Gemini đã được mã hóa và lưu ở phía máy chủ." },
 ];
 
 function AuthGate({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) => void }) {
@@ -94,6 +106,12 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [saveState, setSaveState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa lưu" });
   const [directionState, setDirectionState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa chọn" });
+  const [credentials, setCredentials] = useState<AICredential[]>([]);
+  const [credentialsLoading, setCredentialsLoading] = useState(false);
+  const [aiProvider, setAIProvider] = useState<AIProvider>("mock");
+  const [credentialId, setCredentialId] = useState("");
+  const [generationState, setGenerationState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa tạo nội dung" });
+  const [generationResult, setGenerationResult] = useState<{ provider: string; model?: string; objectives: number; slides: number; questions: number; retries?: number } | null>(null);
 
   useEffect(() => {
     currentTeacher().then(setTeacher).catch(() => setTeacher(null));
@@ -120,6 +138,10 @@ export default function Home() {
         setSourceDirty(false);
         setSaveState({ tone: "saved", message: `Đã khôi phục • bản ${latest.revision}` });
         setDirectionState({ tone: "saved", message: "Đã lưu trong course.json" });
+        if (latest.course.slides.length > 0) {
+          setGenerationState({ tone: "saved", message: `Đã có nội dung • bản ${latest.revision}` });
+          setGenerationResult({ provider: "Đã lưu", objectives: latest.course.objectives.length, slides: latest.course.slides.length, questions: latest.course.question_bank.length });
+        }
       })
       .catch((reason) => {
         if (!cancelled) setSaveState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể mở bản nháp gần nhất." });
@@ -127,6 +149,17 @@ export default function Home() {
       .finally(() => {
         if (!cancelled) setWorkspaceLoading(false);
       });
+    return () => { cancelled = true; };
+  }, [teacher]);
+
+  useEffect(() => {
+    if (!teacher) return;
+    let cancelled = false;
+    setCredentialsLoading(true);
+    listAICredentials()
+      .then((items) => { if (!cancelled) setCredentials(items); })
+      .catch((reason) => { if (!cancelled) setGenerationState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể tải API key." }); })
+      .finally(() => { if (!cancelled) setCredentialsLoading(false); });
     return () => { cancelled = true; };
   }, [teacher]);
 
@@ -229,6 +262,68 @@ export default function Home() {
     }
   }
 
+  function selectProvider(provider: AIProvider) {
+    setAIProvider(provider);
+    const firstCredential = credentials.find((item) => item.provider === provider);
+    setCredentialId(firstCredential?.id ?? "");
+    if (project?.course.slides.length === 0) setGenerationState({ tone: "idle", message: "Sẵn sàng tạo nội dung" });
+  }
+
+  async function generateAIContent(): Promise<boolean> {
+    if (busy) return false;
+    if (!project) {
+      setSaveState({ tone: "error", message: "Cần lưu nguồn bài học trước." });
+      setActiveStep(1);
+      return false;
+    }
+    if (project.course.slides.length > 0) {
+      setGenerationState({ tone: "error", message: "Bài đã có nội dung. Hãy chuyển sang Bước 4 để duyệt và chỉnh sửa." });
+      return false;
+    }
+    if (!draft.sourceText.trim()) {
+      setGenerationState({ tone: "error", message: "Không có nội dung nguồn để AI phân tích." });
+      setActiveStep(1);
+      return false;
+    }
+    if (project.course.metadata.direction !== draft.direction) {
+      setDirectionState({ tone: "error", message: "Cần lưu định hướng trước khi tạo nội dung." });
+      setActiveStep(2);
+      return false;
+    }
+    if (aiProvider !== "mock" && !credentialId) {
+      setGenerationState({ tone: "error", message: "Hãy chọn API key đang hoạt động hoặc dùng Mock AI miễn phí." });
+      return false;
+    }
+    setBusy(true);
+    setGenerationState({ tone: "loading", message: "AI đang phân tích và dựng bản nháp…" });
+    try {
+      const generated: GenerationResponse = await generateCourse({
+        title: project.title,
+        source: draft.sourceText,
+        direction: draft.direction,
+        provider: aiProvider,
+        credentialId,
+      });
+      const updated = await populateProjectFromGeneration(project, generated);
+      setProject(updated);
+      setGenerationResult({
+        provider: generated.generation.provider,
+        model: generated.generation.model,
+        objectives: updated.course.objectives.length,
+        slides: updated.course.slides.length,
+        questions: updated.course.question_bank.length,
+        retries: generated.generation.retries,
+      });
+      setGenerationState({ tone: "saved", message: `Đã lưu nội dung • bản ${updated.revision}` });
+      return true;
+    } catch (reason) {
+      setGenerationState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể tạo nội dung bằng AI." });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function navigateToStep(number: number) {
     if (number > 1 && activeStep === 1 && !(await saveDraft())) return;
     if (number > 2 && activeStep === 1) {
@@ -236,12 +331,24 @@ export default function Home() {
       return;
     }
     if (number > 2 && activeStep === 2 && !(await saveDirection())) return;
+    if (number > 3 && activeStep === 2) {
+      setActiveStep(3);
+      return;
+    }
+    if (number > 3 && activeStep === 3 && (!project || project.course.slides.length === 0)) {
+      setGenerationState({ tone: "error", message: "Cần tạo và lưu nội dung AI trước khi chuyển sang duyệt." });
+      return;
+    }
     setActiveStep(number);
   }
 
   async function advance() {
     if (activeStep === 1 && !(await saveDraft())) return;
     if (activeStep === 2 && !(await saveDirection())) return;
+    if (activeStep === 3 && (!project || project.course.slides.length === 0)) {
+      setGenerationState({ tone: "error", message: "Cần tạo và lưu nội dung AI trước khi chuyển sang duyệt." });
+      return;
+    }
     setActiveStep((value) => Math.min(8, value + 1));
   }
 
@@ -253,6 +360,8 @@ export default function Home() {
     setSourceDirty(false);
     setSaveState({ tone: "idle", message: "Bài mới chưa lưu" });
     setDirectionState({ tone: "idle", message: "Chưa chọn" });
+    setGenerationState({ tone: "idle", message: "Chưa tạo nội dung" });
+    setGenerationResult(null);
     setActiveStep(1);
   }
 
@@ -266,6 +375,11 @@ export default function Home() {
     setSources([]);
     setDraft(initialCourseDraft);
     setDirectionState({ tone: "idle", message: "Chưa chọn" });
+    setCredentials([]);
+    setCredentialId("");
+    setAIProvider("mock");
+    setGenerationState({ tone: "idle", message: "Chưa tạo nội dung" });
+    setGenerationResult(null);
   }
 
   return (
@@ -298,7 +412,7 @@ export default function Home() {
                 {project && <div className="project-context"><span>Đang làm</span><strong>{project.title}</strong><small>Mã {project.id.slice(0, 8)} • phiên bản {project.revision}</small></div>}
                 <label>Tên bài học<input required maxLength={300} disabled={busy || workspaceLoading} value={draft.title} onChange={(event) => { setDraft({ ...draft, title: event.target.value }); markChanged(); }} placeholder="Ví dụ: Phân số bằng nhau" /></label>
                 <label className="source-field">Nội dung nguồn<textarea disabled={busy || workspaceLoading} value={draft.sourceText} onChange={(event) => { setDraft({ ...draft, sourceText: event.target.value }); setSourceDirty(true); markChanged(); }} placeholder="Dán nội dung bài học tại đây…" rows={12} /></label>
-                <label className="upload-field"><span>Hoặc tải học liệu</span><input type="file" disabled={busy || workspaceLoading} accept=".txt,.pdf,.docx,.pptx" onChange={(event) => { void uploadSource(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} /><small>TXT, PDF, DOCX hoặc PPTX; tối đa 25 MB. Hệ thống sẽ trích xuất nội dung để anh kiểm tra.</small></label>
+                <label className="upload-field"><span>Hoặc tải học liệu</span><input type="file" disabled={busy || workspaceLoading} accept=".txt,.pdf,.docx,.pptx" onChange={(event) => { void uploadSource(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} /><small>TXT, PDF, DOCX hoặc PPTX; tối đa 25 MB. Hệ thống sẽ trích xuất nội dung để giáo viên kiểm tra.</small></label>
                 {sources.length > 0 && <div className="source-history"><strong>Học liệu đã lưu</strong>{sources.slice(0, 3).map((source) => <span key={source.id}>{source.original_name}<small>{Math.max(1, Math.round(source.byte_size / 1024))} KB</small></span>)}</div>}
                 <div className="save-row"><p>Dữ liệu chỉ được xem là đã lưu khi máy chủ xác nhận.</p><button className="primary" disabled={busy || workspaceLoading}>{busy ? "Đang lưu…" : project ? "Lưu thay đổi" : "Tạo bản nháp"}</button></div>
               </form>
@@ -329,6 +443,62 @@ export default function Home() {
                   <p>Lựa chọn được lưu trong <code>course.json</code>; nội dung nguồn và các tệp đã tải ở Bước 1 không thay đổi.</p>
                 </div>
                 <div className="save-row"><p>Hệ thống dùng revision để ngăn hai phiên ghi đè lẫn nhau.</p><button className="primary" disabled={busy || workspaceLoading}>{busy ? "Đang lưu…" : "Lưu định hướng"}</button></div>
+              </form>
+            </>
+          ) : activeStep === 3 ? (
+            <>
+              <div className="section-heading">
+                <div><span className="task-label">TASK 03</span><h2>AI tạo bản nháp có cấu trúc</h2><p>Chọn nhà cung cấp rồi tạo mục tiêu, slide và ngân hàng câu hỏi từ nguồn đã lưu.</p></div>
+                <span className={`status-pill ${generationState.tone}`} role="status">{generationState.message}</span>
+              </div>
+              <form className="generation-form" onSubmit={(event) => { event.preventDefault(); void generateAIContent(); }}>
+                <fieldset disabled={busy || workspaceLoading}>
+                  <legend>Nhà cung cấp AI</legend>
+                  <div className="provider-grid">
+                    {providerOptions.map((option) => (
+                      <label className={aiProvider === option.id ? "provider-card selected" : "provider-card"} key={option.id}>
+                        <input type="radio" name="provider" value={option.id} checked={aiProvider === option.id} onChange={() => selectProvider(option.id)} />
+                        <span className="provider-title"><strong>{option.title}</strong><small>{option.badge}</small></span>
+                        <p>{option.summary}</p>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                {aiProvider !== "mock" && (
+                  <div className="credential-panel">
+                    <label>API key đã lưu
+                      <select disabled={busy || credentialsLoading} value={credentialId} onChange={(event) => setCredentialId(event.target.value)}>
+                        <option value="">{credentialsLoading ? "Đang tải danh sách…" : "Chọn một API key đang hoạt động"}</option>
+                        {credentials.filter((item) => item.provider === aiProvider).map((item) => (
+                          <option key={item.id} value={item.id}>{item.label} ••••{item.secret_last4}{item.model_default ? ` • ${item.model_default}` : ""}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {credentials.filter((item) => item.provider === aiProvider).length === 0 && !credentialsLoading && <p>Chưa có key {aiProvider === "openai" ? "OpenAI" : "Gemini"} đang hoạt động. Có thể chọn Mock AI để tiếp tục bản demo; khóa thật chỉ được nhập và mã hóa ở phía máy chủ.</p>}
+                    <small>Trình duyệt chỉ nhận mã định danh, nhãn và bốn ký tự cuối; không nhận lại giá trị bí mật.</small>
+                  </div>
+                )}
+
+                <div className="generation-context">
+                  <div className="generation-context-heading"><span>Dữ liệu đầu vào đã khóa</span><small>AI không tạo dự án mới và không thay đổi nguồn gốc.</small></div>
+                  <div className="context-grid">
+                    <div><span>Bài học</span><strong>{project?.title ?? "Chưa có bản nháp"}</strong></div>
+                    <div><span>Định hướng</span><strong>{directionOptions.find((option) => option.id === draft.direction)?.title}</strong></div>
+                    <div><span>Nội dung nguồn</span><strong>{draft.sourceText.trim().length.toLocaleString("vi-VN")} ký tự</strong></div>
+                    <div><span>Phiên bản</span><strong>{project ? `${project.id.slice(0, 8)} • bản ${project.revision}` : "Chưa lưu"}</strong></div>
+                  </div>
+                </div>
+
+                {generationResult && (
+                  <div className="generation-result" aria-live="polite">
+                    <div><span>Kết quả canonical</span><strong>{generationResult.provider}{generationResult.model ? ` • ${generationResult.model}` : ""}</strong><small>{generationResult.retries ? `Đã tự sửa JSON ${generationResult.retries} lần` : "Dữ liệu hợp lệ ngay lần đầu"}</small></div>
+                    <div className="result-stats"><span><b>{generationResult.objectives}</b>Mục tiêu</span><span><b>{generationResult.slides}</b>Slide</span><span><b>{generationResult.questions}</b>Câu hỏi</span></div>
+                  </div>
+                )}
+
+                <div className="generation-note"><strong>Giáo viên giữ quyền quyết định.</strong><p>AI chỉ tạo bản nháp. Nội dung cần được đọc, sửa và duyệt ở Bước 4 trước khi chọn quiz hoặc đóng gói SCORM.</p></div>
+                <div className="save-row"><p>Kết quả được kiểm tra theo schema rồi lưu vào đúng <code>course.json</code> của dự án này.</p><button className="primary" disabled={busy || workspaceLoading || Boolean(project?.course.slides.length) || (aiProvider !== "mock" && !credentialId)}>{busy ? "Đang tạo bản nháp…" : project?.course.slides.length ? "Nội dung đã được lưu" : "Tạo nội dung bằng AI"}</button></div>
               </form>
             </>
           ) : (

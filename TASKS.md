@@ -157,3 +157,8 @@ Acceptance:
 - [x] Add Google OpenID Connect server flow with PKCE, state/nonce and verified identity binding.
 - [x] Add exact-email first administrator bootstrap for Trường Tiểu học Trần Quốc Toản.
 - [ ] Configure the Google Cloud consent screen, OAuth client and exact production callback URI on the approved domain.
+
+## Milestone 12.8 — End-to-end 8-step workflow review [P1]
+- [x] Allow a teacher to start at Step 1 by selecting a source file; create a canonical draft project automatically.
+- [x] Apply AI-generated content to that same draft project instead of creating a duplicate lesson.
+- [x] Preserve generation-run linkage when the AI populates a pre-existing draft.

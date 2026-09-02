@@ -292,6 +292,7 @@ class CredentialUpdateRequest(BaseModel):
 class ProjectUpdateRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     course: Course
+    generation_id: str | None = None
 
 class RenameProjectRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
@@ -1322,6 +1323,10 @@ def update_project(project_id: str, payload: ProjectUpdateRequest, user: User = 
         if existing is None:
             raise HTTPException(status_code=404, detail="Project not found.")
         raise HTTPException(status_code=409, detail={"code": "COURSE_REVISION_CONFLICT", "message": "The project was updated in another session."})
+    if payload.generation_id:
+        run = db.scalar(select(GenerationRun).where(GenerationRun.id == payload.generation_id, GenerationRun.user_id == user.id, GenerationRun.project_id.is_(None)))
+        if run is not None:
+            run.project_id = project_id
     db.commit()
     return get_project(project_id, user, db)
 

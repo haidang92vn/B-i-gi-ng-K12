@@ -318,19 +318,32 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(uploaded.status_code, 201, uploaded.text)
         self.assertEqual(uploaded.json()["extracted_text"], "Noi dung bai hoc")
 
-        updated_course = project["course"]
-        updated_course["revision"] = 2
+        generated_for_draft = client.post("/api/generate", json={"title": title, "source": "Noi dung da tai len.", "provider": "mock"})
+        self.assertEqual(generated_for_draft.status_code, 200, generated_for_draft.text)
+        generated_course = generated_for_draft.json()["course"]
+        generated_course["id"] = project["id"]
+        generated_course["revision"] = 2
+        populated_draft = client.patch(
+            f"/api/v1/projects/{project['id']}",
+            json={"expected_revision": 1, "course": generated_course, "generation_id": generated_for_draft.json()["generation"]["id"]},
+        )
+        self.assertEqual(populated_draft.status_code, 200, populated_draft.text)
+        self.assertEqual(populated_draft.json()["id"], project["id"])
+        self.assertEqual(populated_draft.json()["revision"], 2)
+
+        updated_course = populated_draft.json()["course"]
+        updated_course["revision"] = 3
         updated_course["metadata"]["title"] = f"{title} đã sửa"
         updated = client.patch(
             f"/api/v1/projects/{project['id']}",
-            json={"expected_revision": 1, "course": updated_course},
+            json={"expected_revision": 2, "course": updated_course},
         )
         self.assertEqual(updated.status_code, 200, updated.text)
-        self.assertEqual(updated.json()["revision"], 2)
+        self.assertEqual(updated.json()["revision"], 3)
 
         stale = client.patch(
             f"/api/v1/projects/{project['id']}",
-            json={"expected_revision": 1, "course": updated_course},
+            json={"expected_revision": 2, "course": updated_course},
         )
         self.assertEqual(stale.status_code, 409, stale.text)
         self.assertEqual(stale.json()["detail"]["code"], "COURSE_REVISION_CONFLICT")
@@ -531,6 +544,7 @@ class PrototypeTests(unittest.TestCase):
         client = TestClient(self.module.app)
         email = f"google-admin-{uuid4()}@example.test"
         school_name = f"Trường Tiểu học Trần Quốc Toản {uuid4()}"
+        subject = f"google-subject-{uuid4()}"
         environment = {
             "GOOGLE_OAUTH_CLIENT_ID": "test-client.apps.googleusercontent.com",
             "GOOGLE_OAUTH_CLIENT_SECRET": "test-secret-not-a-real-secret",
@@ -539,7 +553,7 @@ class PrototypeTests(unittest.TestCase):
             "GOOGLE_BOOTSTRAP_SCHOOL_NAME": school_name,
         }
         with patch.dict(os.environ, environment, clear=False), patch.object(
-            self.module, "exchange_code", return_value=GoogleProfile(subject="google-subject-123", email=email, full_name="Google Admin"),
+            self.module, "exchange_code", return_value=GoogleProfile(subject=subject, email=email, full_name="Google Admin"),
         ):
             start = client.get("/api/v1/auth/google/start", follow_redirects=False)
             self.assertEqual(start.status_code, 307, start.text)
@@ -556,7 +570,7 @@ class PrototypeTests(unittest.TestCase):
             self.assertEqual(schools[0]["role"], "school_admin")
             self.assertEqual(client.get("/api/v1/auth/google/callback?code=x&state=wrong", follow_redirects=False).headers["location"], "/?auth_error=google")
             with self.module.SessionLocal() as db:
-                identities = db.scalars(self.module.select(self.module.OAuthIdentity).where(self.module.OAuthIdentity.provider == "google", self.module.OAuthIdentity.subject == "google-subject-123")).all()
+                identities = db.scalars(self.module.select(self.module.OAuthIdentity).where(self.module.OAuthIdentity.provider == "google", self.module.OAuthIdentity.subject == subject)).all()
                 self.assertEqual(len(identities), 1)
 
 

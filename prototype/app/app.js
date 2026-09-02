@@ -120,7 +120,27 @@ async function generateAI(){
   }
 }
 document.getElementById("generateBtn").onclick=generateAI;
-sourceFile.onchange=async()=>{if(!sourceFile.files[0]||!state.project){sourceFileStatus.textContent='Hãy tạo hoặc mở một bài giảng trước khi tải học liệu.';return;}const form=new FormData();form.append('upload',sourceFile.files[0]);const r=await fetch(`/api/v1/projects/${state.project.id}/sources`,{method:'POST',body:form});const data=await r.json();if(r.ok){sourceFileStatus.textContent=`Đã tải ${data.original_name}.`;if(data.extracted_text)sourceText.value=data.extracted_text;}else sourceFileStatus.textContent=data.detail||'Không tải được tệp.';};
+async function ensureDraftProject(){
+  if(state.project)return state.project;
+  const title=document.getElementById('lessonTitle').value.trim()||'Bài học';
+  sourceFileStatus.textContent='Đang tạo bản nháp để lưu học liệu…';
+  const response=await fetch('/api/v1/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,direction:state.direction})});
+  if(!response.ok)throw new Error((await apiMessage(response))||'Không thể tạo bản nháp bài giảng.');
+  state.project=await response.json();
+  applyProjectAccess();
+  return state.project;
+}
+sourceFile.onchange=async()=>{
+  if(!sourceFile.files[0])return;
+  try{
+    await ensureDraftProject();
+    const form=new FormData();form.append('upload',sourceFile.files[0]);
+    const r=await fetch(`/api/v1/projects/${state.project.id}/sources`,{method:'POST',body:form});
+    const data=await r.json();
+    if(r.ok){sourceFileStatus.textContent=`Đã tải ${data.original_name}.`;if(data.extracted_text)sourceText.value=data.extracted_text;}
+    else sourceFileStatus.textContent=data.detail||'Không tải được tệp.';
+  }catch(error){sourceFileStatus.textContent=error.message||'Không thể tạo bản nháp để tải tệp.';}
+};
 
 function syncCanonicalCourse(){
   const g=state.generated;if(!g || !g.course)return null;
@@ -143,10 +163,19 @@ function syncCanonicalCourse(){
 
 async function createProjectFromGenerated(){
   const course=syncCanonicalCourse();
+  if(state.project){
+    const expected=state.project.revision;
+    course.id=state.project.id;
+    course.revision=expected+1;
+    const response=await fetch(`/api/v1/projects/${state.project.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({expected_revision:expected,course,generation_id:state.generated.generation?.id||null})});
+    if(!response.ok)throw new Error((await apiMessage(response))||"Không thể cập nhật bản nháp bài giảng.");
+    state.project=await response.json();
+  }else{
   const payload={title:course.metadata.title,direction:state.direction,course,generation_id:state.generated.generation?.id||null};
   const response=await fetch("/api/v1/projects",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
   if(!response.ok) throw new Error("Không thể lưu bản nháp bài giảng.");
   state.project=await response.json();
+  }
   applyProjectAccess();
   state.generated.course=state.project.course;
   state.generated.sections=state.project.course.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',mediaBlocks:s.blocks.filter(b=>b.type!=='text'),note:s.speaker_notes||'',status:s.status,layout:s.layout}));

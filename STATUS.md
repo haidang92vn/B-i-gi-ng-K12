@@ -36,6 +36,7 @@ architecture. It is **not yet the production application**.
 - K12Online analytics has a privacy-preserving report-import prototype: a school admin imports bounded CSV UTF-8/XLSX data, original report bytes are discarded, learner identifiers become HMAC tokens, and the dashboard shows school/lesson aggregates only. Deterministic suggestions use aggregate metrics only; no AI provider receives learner-level data.
 - A one-shot production provisioning service can safely create the first administrator and school membership after Alembic migration. The school-specific runbook is prepared for Trường Tiểu học Trần Quốc Toản, but it intentionally has not created an account without the authorized administrator's email/password or operated a real VPS.
 - Google sign-in/register is implemented as a backend-verified OpenID Connect server flow. A verified email can bootstrap the first school administrator only when that exact email and school name are set in the VPS secret file; Google Cloud OAuth credentials and the production callback remain external setup work.
+- The eight-step flow now accepts source files at Step 1 without requiring a pre-existing lesson: it creates one canonical draft, uploads the material, and then fills that same project with the AI storyboard and question bank. This avoids duplicate lessons and retains generation metadata.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 

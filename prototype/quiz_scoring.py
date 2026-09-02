@@ -38,7 +38,7 @@ def score_question(question: Question, answer: Any) -> tuple[bool, float]:
         correct = normalise_set(question.correct_answer)
         submitted = normalise_set(answer)
         is_correct = submitted == correct
-    elif question.type == "ordering":
+    elif question.type in {"ordering", "dragdrop"}:
         correct = [normalise(item) for item in question.correct_answer]
         submitted = [normalise(item) for item in answer] if isinstance(answer, (list, tuple)) else [normalise(answer)]
         is_correct = submitted == correct

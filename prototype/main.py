@@ -906,9 +906,10 @@ class QuizItem(BaseModel):
     id: str
     question: str
     options: List[str] = []
-    answer: str = ""
+    answer: Any = ""
     quiz_type: str = "single"
     selected: bool = True
+    settings: dict[str, Any] = Field(default_factory=dict)
 
 class ExportRequest(BaseModel):
     title: str
@@ -1052,7 +1053,8 @@ def generated_response(course: Course, provider: str) -> dict:
         block = next((item for item in slide.blocks if item.type == "text"), None)
         sections.append({"id": slide.id, "title": slide.title, "content": block.text if block and block.text else "", "note": slide.speaker_notes or "AI gợi ý – giáo viên có thể sửa trực tiếp."})
     quizzes = [{"id": item.id, "question": item.question, "options": item.options,
-                "answer": str(item.correct_answer), "quiz_type": item.type, "selected": item.selected}
+                "answer": item.correct_answer, "quiz_type": item.type, "selected": item.selected,
+                "settings": item.settings}
                for item in course.question_bank]
     return {"direction_name": direction_name, "objectives": [item.text for item in course.objectives],
             "sections": sections, "quizzes": quizzes, "course": course.model_dump(mode="json"),
@@ -1663,8 +1665,8 @@ def export_request_from_course(course: Course, media_by_id: dict[str, dict[str, 
                              for block in slide.blocks if block.asset_id and block.asset_id in media_by_id]}
                   for slide in course.slides],
         quizzes=[QuizItem(id=item.id, question=item.question, options=item.options,
-                          answer=json.dumps(item.correct_answer, ensure_ascii=False) if not isinstance(item.correct_answer, str) else item.correct_answer,
-                          quiz_type=item.type, selected=item.selected) for item in course.question_bank],
+                          answer=item.correct_answer, quiz_type=item.type, selected=item.selected,
+                          settings=item.settings) for item in course.question_bank],
         passing_score=course.completion.passing_score, completion_percent=course.completion.viewed_percent,
         resume=course.scorm.resume, navigation_mode=course.navigation.mode,
         show_menu=course.navigation.show_menu, primary_color=course.theme.primary_color, require_quiz=course.completion.require_quiz,
@@ -1732,11 +1734,26 @@ def build_course_html(req: ExportRequest):
                 inputs.append(f'<label><input type="checkbox" name="{q.id}" value="{html.escape(opt)}"> {html.escape(opt)}</label>')
         elif q.quiz_type == "fill":
             inputs.append(f'<input class="fill" name="{q.id}" placeholder="Nhập câu trả lời">')
+        elif q.quiz_type == "dragdrop":
+            inputs.append(f'<div class="drag-bank">{''.join(f"<button type=\"button\" class=\"drag-token\" draggable=\"true\" data-value=\"{html.escape(opt, quote=True)}\">{html.escape(opt)}</button>" for opt in opts)}</div><div class="drop-zone" data-question="{q.id}" aria-label="Vùng thả đáp án">Kéo các thẻ vào đây theo thứ tự đúng</div>')
+        elif q.quiz_type == "image":
+            image_options = q.settings.get("image_options", []) if isinstance(q.settings, dict) else []
+            for item in image_options:
+                if not isinstance(item, dict):
+                    continue
+                option_id, asset_id = str(item.get("id", "")), str(item.get("asset_id", ""))
+                asset = req.media_by_id.get(asset_id, {})
+                source = str(asset.get("src", "")) if asset.get("kind") == "image" else ""
+                label = str(item.get("label") or asset.get("label") or option_id)
+                if option_id and source:
+                    inputs.append(f'<label class="image-option"><input type="radio" name="{q.id}" value="{html.escape(option_id, quote=True)}"><img src="{html.escape(source, quote=True)}" alt="{html.escape(label)}"><span>{html.escape(label)}</span></label>')
+            if not inputs:
+                inputs.append('<p class="quiz-warning">Giáo viên chưa gắn đủ ảnh cho câu hỏi này.</p>')
         else:
             for opt in opts:
                 inputs.append(f'<label><input type="radio" name="{q.id}" value="{html.escape(opt)}"> {html.escape(opt)}</label>')
         quiz_html.append(f'''
-          <div class="question" data-id="{q.id}" data-answer="{html.escape(q.answer)}" data-type="{q.quiz_type}">
+          <div class="question" data-id="{q.id}" data-type="{q.quiz_type}">
             <div class="qmeta">{html.escape(q.quiz_type)}</div>
             <strong>{html.escape(q.question)}</strong>
             <div class="options">{''.join(inputs)}</div>
@@ -1783,6 +1800,7 @@ h1{{font-size:44px;margin:12px 0}} h2{{font-size:34px}} .lead{{font-size:20px;co
 .content{{font-size:20px;line-height:1.7;white-space:normal}} .options{{display:grid;gap:10px;margin-top:14px}}
 .media{{margin:22px 0 0;padding:14px;border:1px solid #e5e7ef;border-radius:16px;background:#f8f9fd}}.media img,.media video{{display:block;max-width:100%;max-height:420px;border-radius:10px;margin:auto}}.media audio{{width:100%;margin-top:8px}}.media figcaption{{font-size:13px;color:var(--muted);margin-top:8px}}
 .options label{{background:#fff;border:1px solid #dde2ee;border-radius:12px;padding:12px;cursor:pointer}}
+.drag-bank{{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}}.drag-token{{border:1px solid #b9c7f4;background:#fff;border-radius:10px;padding:9px 12px;cursor:grab;color:var(--ink)}}.drop-zone{{min-height:58px;border:2px dashed #9aacf4;border-radius:12px;padding:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--muted)}}.drop-zone.drag-over{{background:#eef2ff}}.drop-zone .drag-token{{cursor:grab}}.image-option{{display:grid;grid-template-columns:22px minmax(0,150px) 1fr;gap:10px;align-items:center}}.image-option img{{width:150px;height:96px;object-fit:cover;border-radius:9px;border:1px solid #dde2ee}}.quiz-warning{{color:#9a6500}}
 .fill{{width:100%;padding:12px;border-radius:10px;border:1px solid #cfd5e2}}
 .qmeta{{font-size:11px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}}
 .toolbar{{display:flex;gap:12px;align-items:center;padding:16px 24px;background:#fff;border-top:1px solid #e7eaf1;position:sticky;bottom:0}}
@@ -1839,6 +1857,17 @@ function renderMenu(){{
   menu.innerHTML=slides.map((slide,index)=>`<button class="${{index===current?"active":""}}" ${{index>highestVisited&&CFG.navigationMode!=="free"?"disabled":""}} onclick="show(${{index}})">Slide ${{index+1}}</button>`).join("");
 }}
 function toggleFullscreen(){{if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();else document.exitFullscreen?.();}}
+let draggingToken=null;
+document.addEventListener("dragstart",event=>{{if(event.target.classList.contains("drag-token"))draggingToken=event.target;}});
+document.addEventListener("dragover",event=>{{const zone=event.target.closest(".drop-zone");if(zone){{event.preventDefault();zone.classList.add("drag-over");}}}});
+document.addEventListener("dragleave",event=>{{event.target.closest(".drop-zone")?.classList.remove("drag-over");}});
+document.addEventListener("drop",event=>{{const zone=event.target.closest(".drop-zone");if(zone&&draggingToken){{event.preventDefault();zone.classList.remove("drag-over");zone.appendChild(draggingToken);draggingToken=null;}}}});
+function norm(value){{return String(value??"").trim().toLocaleLowerCase();}}
+function sameAnswer(type,value,answer){{
+  if(type==="multiple"){{const left=[...value].map(norm).sort(),right=(Array.isArray(answer)?answer:[answer]).map(norm).sort();return JSON.stringify(left)===JSON.stringify(right);}}
+  if(type==="ordering"||type==="dragdrop"){{const right=Array.isArray(answer)?answer:[answer];return JSON.stringify(value.map(norm))===JSON.stringify(right.map(norm));}}
+  return norm(value)===norm(answer);
+}}
 
 function submitQuiz(){{
   let correct=0;
@@ -1847,12 +1876,14 @@ function submitQuiz(){{
     const id=q.dataset.id, type=q.dataset.type, answer=ANSWERS[id];
     let value="";
     if(type==="multiple"){{
-      value=[...q.querySelectorAll("input:checked")].map(x=>x.value).join("|");
+      value=[...q.querySelectorAll("input:checked")].map(x=>x.value);
+    }} else if(type==="dragdrop"){{
+      value=[...q.querySelectorAll(".drop-zone .drag-token")].map(x=>x.dataset.value);
     }} else {{
       const el=q.querySelector("input:checked") || q.querySelector(".fill");
       value=el ? el.value.trim() : "";
     }}
-    if(value.toLowerCase() === String(answer).trim().toLowerCase()) correct++;
+    if(sameAnswer(type,value,answer)) correct++;
   }});
   const score = questions.length ? Math.round(correct/questions.length*100) : 100;
   scormSet("cmi.score.raw", score);
@@ -1886,6 +1917,7 @@ def export_scorm(req: ExportRequest, user: User = Depends(current_teacher), db: 
         project, _ = project_with_access(db, req.project_id, user)
         course = Course.model_validate(project.course_json)
         referenced_ids = {block.asset_id for slide in course.slides for block in slide.blocks if block.asset_id}
+        referenced_ids.update(str(item.get("asset_id")) for question in course.question_bank if question.type == "image" for item in question.settings.get("image_options", []) if isinstance(item, dict) and item.get("asset_id"))
         assets = db.scalars(select(MediaAsset).where(MediaAsset.project_id == project.id, MediaAsset.id.in_(referenced_ids))).all() if referenced_ids else []
         media_by_id: dict[str, dict[str, str]] = {}
         asset_paths: list[str] = []
@@ -1903,6 +1935,10 @@ def export_scorm(req: ExportRequest, user: User = Depends(current_teacher), db: 
             warning = media_warning(asset)
             if warning:
                 warnings.append(warning)
+        image_asset_ids = {str(item.get("asset_id")) for question in course.question_bank if question.type == "image" for item in question.settings.get("image_options", []) if isinstance(item, dict) and item.get("asset_id")}
+        unresolved_image_assets = sorted(asset_id for asset_id in image_asset_ids if media_by_id.get(asset_id, {}).get("kind") != "image")
+        if unresolved_image_assets:
+            raise HTTPException(status_code=422, detail={"code": "QUIZ_IMAGE_ASSET_MISSING", "message": "Một hoặc nhiều ảnh lựa chọn chưa có asset ảnh hợp lệ.", "asset_ids": unresolved_image_assets})
         effective = export_request_from_course(course, media_by_id)
         effective.passing_score, effective.completion_percent, effective.resume = req.passing_score, req.completion_percent, req.resume
         effective.project_id = project.id
@@ -1941,6 +1977,7 @@ def preview_player(project_id: str, user: User = Depends(current_teacher), db: S
     project, _ = project_with_access(db, project_id, user)
     course = Course.model_validate(project.course_json)
     referenced_ids = {block.asset_id for slide in course.slides for block in slide.blocks if block.asset_id}
+    referenced_ids.update(str(item.get("asset_id")) for question in course.question_bank if question.type == "image" for item in question.settings.get("image_options", []) if isinstance(item, dict) and item.get("asset_id"))
     assets = db.scalars(select(MediaAsset).where(MediaAsset.project_id == project.id, MediaAsset.id.in_(referenced_ids))).all() if referenced_ids else []
     media_by_id = {asset.id: {"src": asset.external_url or f"/api/v1/media/{asset.id}/content", "kind": asset.kind, "label": asset.original_name} for asset in assets}
     return HTMLResponse(build_course_html(export_request_from_course(course, media_by_id)))

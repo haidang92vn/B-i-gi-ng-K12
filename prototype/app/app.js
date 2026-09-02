@@ -17,7 +17,7 @@ function applyProjectAccess(){const viewer=!canEditProject();[lessonTitle,source
 async function loadLibrary(){const r=await fetch('/api/v1/projects');if(!r.ok)return;const items=await r.json();libraryList.innerHTML=items.length?items.map(p=>{const access=p.access_level||'owner';const ownerActions=access==='owner'?`<button onclick="shareProject('${p.id}')">Chia sẻ</button><button onclick="archiveProject('${p.id}')">Lưu trữ</button><button onclick="deleteProject('${p.id}')">Xóa</button>`:'';return `<article class="library-item"><strong>${escapeHtml(p.title)}</strong><small>${p.status} • phiên bản ${p.revision} • ${accessLabels[access]}</small><div class="library-actions"><button onclick="openProject('${p.id}')">Mở</button><button onclick="copyProject('${p.id}')">Nhân bản</button>${ownerActions}</div></article>`;}).join(''):'<p class="hint">Chưa có bài giảng nào.</p>';}
 libraryBtn.onclick=()=>{libraryDrawer.classList.add('open');loadLibrary();};closeLibraryBtn.onclick=()=>libraryDrawer.classList.remove('open');
 newLessonBtn.onclick=()=>{libraryDrawer.classList.remove('open');state={direction:'lesson',generated:null,project:null};location.reload();};
-function hydrateProject(project){state.project=project;const c=project.course;state.direction=c.metadata.direction;lessonTitle.value=c.metadata.title;state.generated={course:c,direction_name:{lesson:'Bài học mới',review:'Ôn tập – củng cố',advanced:'Nâng cao – mở rộng'}[c.metadata.direction],objectives:c.objectives.map(x=>x.text),sections:c.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',mediaBlocks:s.blocks.filter(b=>b.type!=='text'),note:s.speaker_notes||'',status:s.status,layout:s.layout})),quizzes:c.question_bank.map(q=>({id:q.id,question:q.question,options:q.options,answer:q.correct_answer,quiz_type:q.type,selected:q.selected,score:q.score,difficulty:q.difficulty,objective_ids:q.objective_ids||[],explanation:q.explanation||'',feedback_correct:q.feedback_correct||'',feedback_incorrect:q.feedback_incorrect||''}))};applyProjectAccess();}
+function hydrateProject(project){state.project=project;const c=project.course;state.direction=c.metadata.direction;lessonTitle.value=c.metadata.title;state.generated={course:c,direction_name:{lesson:'Bài học mới',review:'Ôn tập – củng cố',advanced:'Nâng cao – mở rộng'}[c.metadata.direction],objectives:c.objectives.map(x=>x.text),sections:c.slides.map(s=>({id:s.id,title:s.title,content:s.blocks.find(b=>b.type==='text')?.text||'',mediaBlocks:s.blocks.filter(b=>b.type!=='text'),note:s.speaker_notes||'',status:s.status,layout:s.layout})),quizzes:c.question_bank.map(q=>({id:q.id,question:q.question,options:q.options,answer:q.correct_answer,quiz_type:q.type,selected:q.selected,score:q.score,difficulty:q.difficulty,objective_ids:q.objective_ids||[],settings:q.settings||{},explanation:q.explanation||'',feedback_correct:q.feedback_correct||'',feedback_incorrect:q.feedback_incorrect||''}))};applyProjectAccess();}
 async function openProject(id){const r=await fetch(`/api/v1/projects/${id}`);if(!r.ok)return;hydrateProject(await r.json());renderAI();renderReview();renderQuiz();libraryDrawer.classList.remove('open');setStep(4);}
 const credentialsBtn = document.getElementById('credentialsBtn');
 const credentialsDrawer = document.getElementById('credentialsDrawer');
@@ -156,7 +156,7 @@ function syncCanonicalCourse(){
   course.question_bank=g.quizzes.map(q=>({
     id:q.id,type:q.quiz_type,question:q.question,options:q.options || [],
     correct_answer:q.answer,selected:Boolean(q.selected),score:Number(q.score??1),difficulty:q.difficulty||"understand",
-    objective_ids:q.objective_ids||[],settings:{},explanation:q.explanation||null,feedback_correct:q.feedback_correct||null,feedback_incorrect:q.feedback_incorrect||null
+    objective_ids:q.objective_ids||[],settings:q.settings||{},explanation:q.explanation||null,feedback_correct:q.feedback_correct||null,feedback_incorrect:q.feedback_incorrect||null
   }));
   return course;
 }
@@ -254,7 +254,9 @@ async function regenerateSection(index){
 const quizTypeLabels={single:"Một đáp án",multiple:"Nhiều đáp án",truefalse:"Đúng / Sai",fill:"Điền từ",matching:"Ghép đôi",ordering:"Sắp xếp",dragdrop:"Kéo thả",image:"Chọn hình ảnh"};
 const difficultyLabels={recognize:"Nhận biết",understand:"Thông hiểu",apply:"Vận dụng",advanced:"Nâng cao"};
 function answerForEditor(value){return typeof value==="string"?value:JSON.stringify(value);}
-function parseEditorAnswer(value,type){if(type==="multiple"||type==="ordering"||type==="matching"){try{return JSON.parse(value);}catch{return value.split(/\n|,/).map(x=>x.trim()).filter(Boolean);}}return value;}
+function parseEditorAnswer(value,type){if(type==="multiple"||type==="ordering"||type==="matching"||type==="dragdrop"){try{return JSON.parse(value);}catch{return value.split(/\n|,/).map(x=>x.trim()).filter(Boolean);}}return value;}
+function imageOptionsForEditor(q){return (q.settings?.image_options||[]).map(item=>`${item.id||''} | ${item.asset_id||''} | ${item.label||''}`).join("\n");}
+function parseImageOptions(value){return value.split("\n").map(line=>line.split("|").map(part=>part.trim())).filter(parts=>parts[0]&&parts[1]).map(([id,asset_id,label])=>({id,asset_id,label:label||id}));}
 
 function renderQuiz(){
   const g=state.generated;if(!g)return;
@@ -270,6 +272,7 @@ function renderQuiz(){
       <label>Câu hỏi<textarea data-qquestion="${i}">${escapeHtml(q.question)}</textarea></label>
       <label>Phương án (mỗi dòng một phương án)<textarea data-qoptions="${i}">${escapeHtml((q.options||[]).join("\n"))}</textarea></label>
       <label>Đáp án đúng${["multiple","matching","ordering"].includes(q.quiz_type)?" (JSON hoặc mỗi dòng một giá trị)":""}<textarea data-qanswer="${i}">${escapeHtml(answerForEditor(q.answer))}</textarea></label>
+      ${q.quiz_type==='image'?`<label>Ảnh lựa chọn (mỗi dòng: mã lựa chọn | mã asset ảnh | nhãn)<textarea data-qimage-options="${i}" placeholder="img-1 | 123e4567-... | Hình tam giác">${escapeHtml(imageOptionsForEditor(q))}</textarea><small>Hãy tải ảnh ở bước 6; mã asset xuất hiện dưới từng media. Đáp án đúng là mã lựa chọn, ví dụ <code>img-1</code>.</small></label>`:''}
       <div class="quiz-grid"><label>Giải thích<textarea data-qexplanation="${i}">${escapeHtml(q.explanation||"")}</textarea></label><label>Phản hồi đúng<textarea data-qcorrect="${i}">${escapeHtml(q.feedback_correct||"")}</textarea></label><label>Phản hồi cần cải thiện<textarea data-qincorrect="${i}">${escapeHtml(q.feedback_incorrect||"")}</textarea></label></div>
       <fieldset class="objective-links"><legend>Liên kết mục tiêu</legend>${g.objectives.map((objective,objectiveIndex)=>`<label><input type="checkbox" data-qobjective="${i}" value="o${objectiveIndex+1}" ${(q.objective_ids||[]).includes(`o${objectiveIndex+1}`)?"checked":""}> ${escapeHtml(objective)}</label>`).join("")}</fieldset>
       <div class="editor-actions"><button class="ghost danger" onclick="deleteQuiz(${i})">Xóa câu hỏi</button></div>
@@ -281,6 +284,7 @@ function renderQuiz(){
   document.querySelectorAll("[data-qquestion]").forEach(el=>el.addEventListener("input",()=>{g.quizzes[Number(el.dataset.qquestion)].question=el.value;scheduleSave();}));
   document.querySelectorAll("[data-qoptions]").forEach(el=>el.addEventListener("input",()=>{g.quizzes[Number(el.dataset.qoptions)].options=el.value.split("\n").map(x=>x.trim()).filter(Boolean);scheduleSave();}));
   document.querySelectorAll("[data-qanswer]").forEach(el=>el.addEventListener("input",()=>{const q=g.quizzes[Number(el.dataset.qanswer)];q.answer=parseEditorAnswer(el.value,q.quiz_type);scheduleSave();}));
+  document.querySelectorAll("[data-qimage-options]").forEach(el=>el.addEventListener("input",()=>{const q=g.quizzes[Number(el.dataset.qimageOptions)],image_options=parseImageOptions(el.value);q.settings={...(q.settings||{}),image_options};q.options=image_options.map(item=>item.id);scheduleSave();}));
   document.querySelectorAll("[data-qexplanation]").forEach(el=>el.addEventListener("input",()=>{g.quizzes[Number(el.dataset.qexplanation)].explanation=el.value;scheduleSave();}));
   document.querySelectorAll("[data-qcorrect]").forEach(el=>el.addEventListener("input",()=>{g.quizzes[Number(el.dataset.qcorrect)].feedback_correct=el.value;scheduleSave();}));
   document.querySelectorAll("[data-qincorrect]").forEach(el=>el.addEventListener("input",()=>{g.quizzes[Number(el.dataset.qincorrect)].feedback_incorrect=el.value;scheduleSave();}));
@@ -288,7 +292,7 @@ function renderQuiz(){
   if(!canEditProject())area.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=true);
   updateQuizCount();
 }
-function addQuiz(){state.generated.quizzes.push({id:editorId("question"),question:"Câu hỏi mới",options:["Phương án đúng","Phương án khác"],answer:"Phương án đúng",quiz_type:"single",selected:true,score:1,difficulty:"understand",objective_ids:[],explanation:"",feedback_correct:"Chính xác.",feedback_incorrect:"Hãy xem lại nội dung bài học."});renderQuiz();scheduleSave();}
+function addQuiz(){state.generated.quizzes.push({id:editorId("question"),question:"Câu hỏi mới",options:["Phương án đúng","Phương án khác"],answer:"Phương án đúng",quiz_type:"single",selected:true,score:1,difficulty:"understand",objective_ids:[],settings:{},explanation:"",feedback_correct:"Chính xác.",feedback_incorrect:"Hãy xem lại nội dung bài học."});renderQuiz();scheduleSave();}
 function deleteQuiz(index){if(!confirm("Xóa câu hỏi này khỏi ngân hàng?"))return;state.generated.quizzes.splice(index,1);renderQuiz();updateQuizCount();scheduleSave();}
 function updateQuizCount(){
   const count=state.generated?state.generated.quizzes.filter(q=>q.selected).length:0;
@@ -324,7 +328,7 @@ async function loadMedia(){
   if(!response.ok){setMediaStatus('Không thể tải danh sách media.','error');return;}
   const items=await response.json();
   setMediaStatus(items.length?`${items.length} media đã lưu. Xem thử trước rồi chọn gắn vào slide.`:'Chưa có media cho bài giảng này.');
-  area.innerHTML=items.map(item=>`<article class="media-item"><strong>${escapeHtml(item.original_name)}</strong><small>${escapeHtml(item.source_type)} • ${Math.round(item.byte_size/1024)} KB • ${escapeHtml(item.status)}</small>${mediaPreview(item)}${item.warning?`<p>${escapeHtml(item.warning)}</p>`:''}${item.status!=='attached'&&canEditProject()?`<button class="primary" onclick="attachMedia('${item.id}','${item.slide_id||''}')">Gắn vào slide</button>`:''}</article>`).join('');
+  area.innerHTML=items.map(item=>`<article class="media-item"><strong>${escapeHtml(item.original_name)}</strong><small>${escapeHtml(item.source_type)} • ${Math.round(item.byte_size/1024)} KB • ${escapeHtml(item.status)}</small><small>Mã asset: <code>${escapeHtml(item.id)}</code></small>${mediaPreview(item)}${item.warning?`<p>${escapeHtml(item.warning)}</p>`:''}${item.status!=='attached'&&canEditProject()?`<button class="primary" onclick="attachMedia('${item.id}','${item.slide_id||''}')">Gắn vào slide</button>`:''}</article>`).join('');
 }
 async function mediaRequest(url,options,successMessage){
   setMediaStatus('Đang tạo/tải media…');

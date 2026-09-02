@@ -50,6 +50,28 @@ class CourseContractTests(unittest.TestCase):
         self.assertEqual(score_question(question("fill", "Quang hợp"), "quang HỢP"), (True, 2))
         self.assertEqual(score_question(question("matching", {"A": "1", "B": "2"}), {"b": "2", "a": "1"}), (True, 2))
         self.assertEqual(score_question(question("ordering", ["Một", "Hai"]), ["Hai", "Một"]), (False, 0.0))
+        self.assertEqual(score_question(question("dragdrop", ["Bước 1", "Bước 2"]), ["bước 1", "Bước 2"]), (True, 2))
+        self.assertEqual(score_question(question("image", "img-2"), "IMG-2"), (True, 2))
+
+    def test_player_renders_dragdrop_and_asset_backed_image_quizzes(self):
+        course = new_course("Tương tác")
+        course.question_bank = [
+            Question(id="drag", type="dragdrop", question="Sắp xếp các bước theo thứ tự.", options=["Bước 1", "Bước 2"], correct_answer=["Bước 1", "Bước 2"], selected=True, score=1, difficulty="apply"),
+            Question(id="image", type="image", question="Chọn đúng hình minh họa.", correct_answer="img-2", selected=True, score=1, difficulty="recognize", settings={"image_options": [{"id": "img-1", "asset_id": "asset-1", "label": "Ảnh một"}, {"id": "img-2", "asset_id": "asset-2", "label": "Ảnh hai"}]}),
+        ]
+        module = load_prototype()
+        request = module.export_request_from_course(course, {"asset-1": {"kind": "image", "src": "assets/asset-1.png", "label": "Ảnh một"}, "asset-2": {"kind": "image", "src": "assets/asset-2.png", "label": "Ảnh hai"}})
+        player = module.build_course_html(request)
+        self.assertIn('class="drag-token"', player)
+        self.assertIn('class="drop-zone"', player)
+        self.assertIn('src="assets/asset-2.png"', player)
+        self.assertIn('sameAnswer(type,value,answer)', player)
+
+    def test_quality_checker_flags_incomplete_image_quiz(self):
+        course = new_course("Ảnh thiếu asset")
+        course.question_bank = [Question(id="image", type="image", question="Chọn đúng hình minh họa cho kiến thức.", correct_answer="img-1", selected=True, score=1, difficulty="recognize", settings={"image_options": [{"id": "img-1", "asset_id": "missing", "label": "Ảnh một"}]})]
+        codes = {item["code"] for item in analyze_course(course)["findings"]}
+        self.assertIn("QUESTION_IMAGE_OPTIONS_MISSING", codes)
 
     def test_scorm_runtime_harness_keeps_completion_and_success_independent(self):
         api = FakeScorm2004API()

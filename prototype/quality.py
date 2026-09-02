@@ -105,6 +105,27 @@ def _question_findings(question: Question) -> list[dict[str, str | None]]:
             "Dạng sắp xếp cần lưu danh sách theo đúng thứ tự.",
             "Nhập đáp án dưới dạng JSON, ví dụ [\"Bước 1\", \"Bước 2\"].",
         ))
+    if question.type == "dragdrop" and (not isinstance(question.correct_answer, list) or len(question.options) < 2):
+        findings.append(_finding(
+            "QUESTION_DRAGDROP_FORMAT", "warning", "question", question.id, "Kéo thả chưa đủ dữ liệu",
+            "Dạng kéo thả cần ít nhất hai thẻ và một danh sách đáp án theo thứ tự đúng.",
+            "Nhập các thẻ ở phần phương án và đáp án dưới dạng JSON, ví dụ [\"Bước 1\", \"Bước 2\"].",
+        ))
+    if question.type == "image":
+        image_options = question.settings.get("image_options", [])
+        image_ids = [item.get("id") for item in image_options if isinstance(item, dict) and item.get("id") and item.get("asset_id")]
+        if len(image_ids) < 2:
+            findings.append(_finding(
+                "QUESTION_IMAGE_OPTIONS_MISSING", "warning", "question", question.id, "Thiếu ảnh lựa chọn",
+                "Dạng chọn ảnh cần tối thiểu hai ảnh đã gắn asset_id.",
+                "Tải ảnh ở bước Dựng bài giảng, sau đó nhập mã asset cho từng lựa chọn ảnh.",
+            ))
+        elif str(question.correct_answer) not in image_ids:
+            findings.append(_finding(
+                "QUESTION_IMAGE_ANSWER_MISMATCH", "warning", "question", question.id, "Đáp án ảnh không khớp",
+                "Đáp án đúng không trùng mã của một ảnh lựa chọn.",
+                "Chọn mã lựa chọn ảnh làm đáp án đúng.",
+            ))
     if question.selected and question.score <= 0:
         findings.append(_finding(
             "QUESTION_ZERO_SCORE", "warning", "question", question.id, "Câu được chọn không có điểm",

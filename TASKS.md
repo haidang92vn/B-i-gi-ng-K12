@@ -81,7 +81,7 @@ Acceptance:
 - [x] Difficulty + objective linkage.
 - [x] Priority 1 renderers: single, multiple, true/false, fill.
 - [x] Priority 2: matching, ordering.
-- [ ] Priority 3: drag/drop, image interactions.
+- [x] Priority 3: drag/drop, image interactions.
 
 Acceptance:
 - selected quiz state persists;

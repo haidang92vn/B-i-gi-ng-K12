@@ -37,6 +37,7 @@ architecture. It is **not yet the production application**.
 - A one-shot production provisioning service can safely create the first administrator and school membership after Alembic migration. The school-specific runbook is prepared for Trường Tiểu học Trần Quốc Toản, but it intentionally has not created an account without the authorized administrator's email/password or operated a real VPS.
 - Google sign-in/register is implemented as a backend-verified OpenID Connect server flow. A verified email can bootstrap the first school administrator only when that exact email and school name are set in the VPS secret file; Google Cloud OAuth credentials and the production callback remain external setup work.
 - The eight-step flow now accepts source files at Step 1 without requiring a pre-existing lesson: it creates one canonical draft, uploads the material, and then fills that same project with the AI storyboard and question bank. This avoids duplicate lessons and retains generation metadata.
+- The quiz player and SCORM renderer support deterministic drag/drop ordering and image selection. Image choices reference project media assets through `course.json`, and export rejects a package with unresolved image references; see `docs/QUIZ_INTERACTIONS.md`.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 

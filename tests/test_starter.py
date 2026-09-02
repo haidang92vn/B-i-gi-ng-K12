@@ -17,6 +17,7 @@ from prototype.course_models import Block, Question, Slide, new_course
 from prototype.quiz_scoring import score_question
 from prototype.scorm_runtime import FakeScorm2004API, ScormRuntime
 from prototype.logging_config import redact
+from prototype.onboarding import ProvisioningError, provision_school_admin
 from prototype.persistence import database_url
 from prototype.quality import analyze_course
 
@@ -491,6 +492,39 @@ class PrototypeTests(unittest.TestCase):
         rejected = admin.post(f"/api/v1/schools/{school['id']}/analytics/imports", files={"upload": ("bad.csv", bad, "text/csv")})
         self.assertEqual(rejected.status_code, 422, rejected.text)
         self.assertIn("learner_identifier", rejected.text)
+
+    def test_first_school_provisioning_is_idempotent_and_does_not_reset_existing_password(self):
+        school_name = f"Trường Tiểu học Trần Quốc Toản {uuid4()}"
+        email = f"first-admin-{uuid4()}@example.test"
+        with self.module.SessionLocal() as db:
+            first = provision_school_admin(
+                db,
+                school_name=school_name,
+                admin_email=email,
+                admin_password="first-safe-password-123",
+                admin_full_name="Quản trị Trần Quốc Toản",
+            )
+            db.commit()
+            original_hash = db.get(self.module.User, first.admin_user_id).password_hash
+            second = provision_school_admin(
+                db,
+                school_name=school_name,
+                admin_email=email,
+                admin_password="different-safe-password-456",
+            )
+            db.commit()
+            self.assertTrue(first.created_user)
+            self.assertTrue(first.created_school)
+            self.assertFalse(second.created_user)
+            self.assertFalse(second.created_school)
+            self.assertEqual(db.get(self.module.User, first.admin_user_id).password_hash, original_hash)
+            membership = self.module.membership_for(db, first.school_id, first.admin_user_id)
+            self.assertIsNotNone(membership)
+            self.assertEqual(membership.role, "school_admin")
+            with self.assertRaises(ProvisioningError):
+                provision_school_admin(
+                    db, school_name=school_name, admin_email="invalid", admin_password="short",
+                )
 
 
 if __name__ == "__main__":

@@ -102,6 +102,24 @@ services:
     profiles: [operations]
     restart: "no"
 
+  provision:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "prototype.onboarding"]
+    env_file: .env
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    profiles: [operations]
+    restart: "no"
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
+
   backup:
     build:
       context: .

@@ -34,6 +34,7 @@ architecture. It is **not yet the production application**.
 - The school shared-question library keeps subject, grade, topic, learning objectives, answer, difficulty and reviewer attribution. Teachers submit a draft from an edited course question; school admins publish or reject it, and only published copies can be added back into a project.
 - Media/TTS supports an explicit teacher preview before attachment. Media bytes live in R2-compatible storage and course slides keep only `asset_id` references; upload validation, rights confirmation, private preview, SCORM asset packaging and large-video warnings are implemented. OpenAI and Gemini remain provider adapters, with Mock AI available for the demo.
 - K12Online analytics has a privacy-preserving report-import prototype: a school admin imports bounded CSV UTF-8/XLSX data, original report bytes are discarded, learner identifiers become HMAC tokens, and the dashboard shows school/lesson aggregates only. Deterministic suggestions use aggregate metrics only; no AI provider receives learner-level data.
+- A one-shot production provisioning service can safely create the first administrator and school membership after Alembic migration. The school-specific runbook is prepared for Trường Tiểu học Trần Quốc Toản, but it intentionally has not created an account without the authorized administrator's email/password or operated a real VPS.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 
@@ -44,5 +45,6 @@ architecture. It is **not yet the production application**.
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
 - A production Next.js frontend and actual background-job handlers (the current Compose worker only validates Redis connectivity).
 - A real de-identified K12Online export/field dictionary, school retention approval and any official API/webhook specification. The generic report-import prototype must be mapped and accepted before live use; see `docs/ANALYTICS.md`.
+- Execution of the controlled Trường Tiểu học Trần Quốc Toản production runbook by the approved VPS operator and school administrator; see `docs/ONBOARDING_TRAN_QUOC_TOAN.md`.
 
 Follow `TASKS.md` and the numbered files in `prompts/` to implement these in order.

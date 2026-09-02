@@ -167,6 +167,13 @@ before normalized storage, and teachers see school/lesson aggregates only. The i
 are deterministic and non-binding; no AI provider receives learner data. See
 [docs/ANALYTICS.md](docs/ANALYTICS.md) and [docs/K12ONLINE_ANALYTICS_DISCOVERY.md](docs/K12ONLINE_ANALYTICS_DISCOVERY.md).
 
+## First production school: Trường Tiểu học Trần Quốc Toản
+
+The repository includes a one-shot, idempotent provisioning service for the first school admin.
+It runs only after PostgreSQL migration, reads the initial password from an ephemeral environment
+variable, and never logs or resets a pre-existing password. Follow
+[docs/ONBOARDING_TRAN_QUOC_TOAN.md](docs/ONBOARDING_TRAN_QUOC_TOAN.md) on the approved VPS.
+
 ## Cấu trúc repository thực tế
 
 ```text
@@ -188,6 +195,7 @@ docs/
   DECISIONS.md                   Quyết định kiến trúc/sản phẩm đã chốt
   DEPLOYMENT.md                  VPS + Docker + R2 + backup
   ANALYTICS.md                   K12Online report import + privacy contract
+  ONBOARDING_TRAN_QUOC_TOAN.md   Runbook trường đầu tiên
   SCORM.md                       SCORM 2004/K12Online contract
   SECURITY.md                    Quy tắc bảo mật
   UX_FLOW.md                     UX flow 8 bước

@@ -147,3 +147,8 @@ Acceptance:
 - [ ] Obtain de-identified export samples and field dictionary from the school/partner administrator before live onboarding.
 - [x] Implement report-import adapter, normalized analytics storage and dashboard from synthetic contract.
 - [ ] Add API/webhook adapter only when K12Online/Viettel supplies an approved specification.
+
+## Milestone 12.6 — First-school production onboarding [P1]
+- [x] Add idempotent first-school administrator provisioning after migration.
+- [x] Prepare VPS secret, migration, administrator and report-import acceptance checklist for Trường Tiểu học Trần Quốc Toản.
+- [ ] Execute the runbook with an authorized administrator email/password and an approved VPS operator.

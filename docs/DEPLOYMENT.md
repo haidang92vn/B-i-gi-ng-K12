@@ -37,6 +37,15 @@ Keep migrations additive/compatible until all old containers have been replaced;
 backup first and document any required rollback procedure. The `migrate` service is an explicit
 operations profile, not an automatic startup side effect.
 
+## First school provisioning
+
+After the migration job succeeds, use the one-shot `provision` operations service to create the
+first school administrator. Supply `INITIAL_SCHOOL_NAME`, `INITIAL_ADMIN_EMAIL`,
+`INITIAL_ADMIN_FULL_NAME` and `INITIAL_ADMIN_PASSWORD` only as ephemeral command environment
+variables; never add the password to `.env` or shell history. The service refuses an un-migrated
+database, does not log a password, and is idempotent without resetting an existing password. See
+`docs/ONBOARDING_TRAN_QUOC_TOAN.md` for the approved first-school runbook.
+
 ## HTTPS, health and monitoring
 
 Caddy obtains and renews certificates automatically after DNS and ports are correct. It is the

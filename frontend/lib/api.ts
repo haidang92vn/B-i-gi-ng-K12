@@ -8,6 +8,24 @@ export type Teacher = {
 export type WorkflowDirection = "lesson" | "review" | "advanced";
 export type AIProvider = "mock" | "openai" | "gemini";
 
+export type CourseBlock = {
+  id: string;
+  type: "heading" | "text" | "image" | "audio" | "video" | "callout" | "quiz" | "embed";
+  text?: string | null;
+  asset_id?: string | null;
+  question_id?: string | null;
+  settings: Record<string, unknown>;
+};
+
+export type CourseSlide = {
+  id: string;
+  title: string;
+  layout: string;
+  status: "ai_draft" | "edited" | "approved";
+  blocks: CourseBlock[];
+  speaker_notes?: string | null;
+};
+
 export type CanonicalCourse = {
   id: string;
   revision: number;
@@ -17,7 +35,7 @@ export type CanonicalCourse = {
     [key: string]: unknown;
   };
   objectives: Array<{ id: string; text: string }>;
-  slides: Array<{ id: string; title: string; status: "ai_draft" | "edited" | "approved"; [key: string]: unknown }>;
+  slides: CourseSlide[];
   question_bank: Array<{ id: string; question: string; [key: string]: unknown }>;
   [key: string]: unknown;
 };
@@ -105,6 +123,12 @@ export async function listProjects(): Promise<Project[]> {
   const response = await fetch("/api/v1/projects", { credentials: "include" });
   if (!response.ok) throw new Error((await message(response)) || "Không thể tải danh sách bài giảng.");
   return response.json() as Promise<Project[]>;
+}
+
+export async function getProject(projectId: string): Promise<Project> {
+  const response = await fetch(`/api/v1/projects/${projectId}`, { credentials: "include" });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tải bài giảng.");
+  return response.json() as Promise<Project>;
 }
 
 export async function createProject(title: string, direction: WorkflowDirection): Promise<Project> {
@@ -215,5 +239,43 @@ export async function populateProjectFromGeneration(project: Project, generated:
     body: JSON.stringify({ expected_revision: project.revision, course, generation_id: generated.generation.id }),
   });
   if (!response.ok) throw new Error((await message(response)) || "Không thể lưu nội dung AI vào bản nháp hiện tại.");
+  return response.json() as Promise<Project>;
+}
+
+export async function updateCanonicalCourse(project: Project, draft: CanonicalCourse): Promise<Project> {
+  const course: CanonicalCourse = {
+    ...draft,
+    id: project.id,
+    revision: project.revision + 1,
+    metadata: { ...draft.metadata, title: project.title },
+  };
+  const response = await fetch(`/api/v1/projects/${project.id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_revision: project.revision, course }),
+  });
+  if (response.status === 409) throw new Error("Bản nháp đã được cập nhật ở phiên khác.");
+  if (!response.ok) throw new Error((await message(response)) || "Không thể lưu nội dung chỉnh sửa.");
+  return response.json() as Promise<Project>;
+}
+
+export async function regenerateProjectSlide(project: Project, slideId: string, input: {
+  source: string;
+  provider: AIProvider;
+  credentialId?: string;
+}): Promise<Project> {
+  const response = await fetch(`/api/v1/projects/${project.id}/slides/${encodeURIComponent(slideId)}/regenerate`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      source: input.source.slice(0, 24000),
+      provider: input.provider,
+      credential_id: input.provider === "mock" ? null : input.credentialId || null,
+      expected_revision: project.revision,
+    }),
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tạo lại slide này.");
   return response.json() as Promise<Project>;
 }

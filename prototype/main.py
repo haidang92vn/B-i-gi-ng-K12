@@ -899,7 +899,7 @@ class GenerateRequest(BaseModel):
 class RegenerateSlideRequest(BaseModel):
     source: str = Field(min_length=1, max_length=24000)
     provider: Literal["mock", "openai", "gemini"] = "mock"
-    credential_id: str | None = None
+    credential_id: str | None = Field(default=None, max_length=36)
     expected_revision: int = Field(ge=1)
 
 class QuizItem(BaseModel):

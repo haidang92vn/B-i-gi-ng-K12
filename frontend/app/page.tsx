@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import CourseEditor from "@/app/course-editor";
 import {
   authenticate,
   createProject,
@@ -112,6 +113,8 @@ export default function Home() {
   const [credentialId, setCredentialId] = useState("");
   const [generationState, setGenerationState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa tạo nội dung" });
   const [generationResult, setGenerationResult] = useState<{ provider: string; model?: string; objectives: number; slides: number; questions: number; retries?: number } | null>(null);
+  const [reviewState, setReviewState] = useState<{ tone: "idle" | "loading" | "saved" | "error"; message: string }>({ tone: "idle", message: "Chưa duyệt" });
+  const [reviewSaved, setReviewSaved] = useState(true);
 
   useEffect(() => {
     currentTeacher().then(setTeacher).catch(() => setTeacher(null));
@@ -141,6 +144,8 @@ export default function Home() {
         if (latest.course.slides.length > 0) {
           setGenerationState({ tone: "saved", message: `Đã có nội dung • bản ${latest.revision}` });
           setGenerationResult({ provider: "Đã lưu", objectives: latest.course.objectives.length, slides: latest.course.slides.length, questions: latest.course.question_bank.length });
+          setReviewState({ tone: "saved", message: `Sẵn sàng duyệt • bản ${latest.revision}` });
+          setReviewSaved(true);
         }
       })
       .catch((reason) => {
@@ -315,6 +320,8 @@ export default function Home() {
         retries: generated.generation.retries,
       });
       setGenerationState({ tone: "saved", message: `Đã lưu nội dung • bản ${updated.revision}` });
+      setReviewState({ tone: "saved", message: `Sẵn sàng duyệt • bản ${updated.revision}` });
+      setReviewSaved(true);
       return true;
     } catch (reason) {
       setGenerationState({ tone: "error", message: reason instanceof Error ? reason.message : "Không thể tạo nội dung bằng AI." });
@@ -325,6 +332,10 @@ export default function Home() {
   }
 
   async function navigateToStep(number: number) {
+    if (activeStep === 4 && number !== 4 && !reviewSaved) {
+      setReviewState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi rời Bước 4." });
+      return;
+    }
     if (number > 1 && activeStep === 1 && !(await saveDraft())) return;
     if (number > 2 && activeStep === 1) {
       setActiveStep(2);
@@ -339,6 +350,14 @@ export default function Home() {
       setGenerationState({ tone: "error", message: "Cần tạo và lưu nội dung AI trước khi chuyển sang duyệt." });
       return;
     }
+    if (number > 4 && activeStep === 3) {
+      setActiveStep(4);
+      return;
+    }
+    if (number > 5 && activeStep === 4) {
+      setActiveStep(5);
+      return;
+    }
     setActiveStep(number);
   }
 
@@ -347,6 +366,10 @@ export default function Home() {
     if (activeStep === 2 && !(await saveDirection())) return;
     if (activeStep === 3 && (!project || project.course.slides.length === 0)) {
       setGenerationState({ tone: "error", message: "Cần tạo và lưu nội dung AI trước khi chuyển sang duyệt." });
+      return;
+    }
+    if (activeStep === 4 && !reviewSaved) {
+      setReviewState({ tone: "error", message: "Hãy chờ autosave hoàn tất trước khi tiếp tục." });
       return;
     }
     setActiveStep((value) => Math.min(8, value + 1));
@@ -362,6 +385,8 @@ export default function Home() {
     setDirectionState({ tone: "idle", message: "Chưa chọn" });
     setGenerationState({ tone: "idle", message: "Chưa tạo nội dung" });
     setGenerationResult(null);
+    setReviewState({ tone: "idle", message: "Chưa duyệt" });
+    setReviewSaved(true);
     setActiveStep(1);
   }
 
@@ -380,6 +405,8 @@ export default function Home() {
     setAIProvider("mock");
     setGenerationState({ tone: "idle", message: "Chưa tạo nội dung" });
     setGenerationResult(null);
+    setReviewState({ tone: "idle", message: "Chưa duyệt" });
+    setReviewSaved(true);
   }
 
   return (
@@ -501,12 +528,28 @@ export default function Home() {
                 <div className="save-row"><p>Kết quả được kiểm tra theo schema rồi lưu vào đúng <code>course.json</code> của dự án này.</p><button className="primary" disabled={busy || workspaceLoading || Boolean(project?.course.slides.length) || (aiProvider !== "mock" && !credentialId)}>{busy ? "Đang tạo bản nháp…" : project?.course.slides.length ? "Nội dung đã được lưu" : "Tạo nội dung bằng AI"}</button></div>
               </form>
             </>
+          ) : activeStep === 4 && project ? (
+            <>
+              <div className="section-heading">
+                <div><span className="task-label">TASK 04</span><h2>Giáo viên duyệt và chỉnh sửa</h2><p>Kiểm tra mục tiêu, biên tập từng slide và chỉ đánh dấu đã duyệt khi nội dung chính xác.</p></div>
+                <span className={`status-pill ${reviewState.tone}`} role="status">{reviewState.message}</span>
+              </div>
+              <CourseEditor
+                key={project.id}
+                project={project}
+                sourceText={draft.sourceText}
+                provider={aiProvider}
+                credentialId={credentialId}
+                onProjectChange={setProject}
+                onSaveState={(tone, message, saved) => { setReviewState({ tone, message }); setReviewSaved(saved); }}
+              />
+            </>
           ) : (
             <div className="step-placeholder"><span>{String(activeStep).padStart(2, "0")}</span><h2>{steps[activeStep - 1][0]}</h2><p>Chức năng này tiếp tục dùng bản prototype ổn định và sẽ được chuyển sang TypeScript ở milestone kế tiếp.</p></div>
           )}
         </section>
 
-        <footer className="flow-footer"><button disabled={activeStep === 1} onClick={() => setActiveStep((value) => Math.max(1, value - 1))}>← Quay lại</button><span>Bước {activeStep}/8</span><button className="primary" disabled={busy || workspaceLoading} onClick={() => { void advance(); }}>{activeStep === 8 ? "Hoàn tất" : activeStep <= 2 ? "Lưu & tiếp tục →" : "Tiếp tục →"}</button></footer>
+        <footer className="flow-footer"><button disabled={activeStep === 1} onClick={() => { void navigateToStep(Math.max(1, activeStep - 1)); }}>← Quay lại</button><span>Bước {activeStep}/8</span><button className="primary" disabled={busy || workspaceLoading || (activeStep === 4 && !reviewSaved)} onClick={() => { void advance(); }}>{activeStep === 8 ? "Hoàn tất" : activeStep <= 2 ? "Lưu & tiếp tục →" : "Tiếp tục →"}</button></footer>
       </main>
     </div>
   );

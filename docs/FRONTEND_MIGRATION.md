@@ -17,6 +17,8 @@ Included now:
 - Step 2 direction selection persisted through an optimistic canonical revision update;
 - Step 3 Mock/OpenAI/Gemini selection, server-owned credential metadata and structured generation;
 - schema-validated AI output populated into the same canonical draft with generation-run linkage;
+- Step 4 objective/slide review, status management and debounced canonical autosave;
+- add, duplicate, reorder and delete slide operations plus targeted regeneration of unapproved slides;
 - a same-origin `/api/*` rewrite to FastAPI.
 
 The browser never receives stored teacher AI credentials. `course.json` remains canonical and no
@@ -79,6 +81,15 @@ run. A provider/schema/network failure leaves the saved source and direction int
 can retry. Existing generated slides are not overwritten from this screen; the teacher continues to
 review and edit them at Step 4.
 
-The next slice implements Step 4 teacher review: edit objectives and slides, manage draft/edited/
-approved status, preserve unsaved values on conflicts and expose targeted regeneration without
-overwriting approved content.
+Step 4 now edits learning objectives and the title, main text, speaker notes, layout and review
+status of each slide. Teachers can add, duplicate, reorder and delete slides. Changes remain in the
+current UI while a 700 ms debounced save advances the canonical project revision; navigation is
+held until the latest change is acknowledged. A conflict or network failure leaves the local values
+visible. Network failures offer a retry; a revision conflict requires an explicit, warned action
+before the editor replaces local values with the newest server version. Targeted regeneration uses the selected
+Step 3 provider, waits for autosave and relies on the backend guard that refuses to overwrite an
+approved slide. Non-text media blocks remain intact during text edits.
+
+The next slice implements Step 5 question-bank selection and editing in Next.js, including quiz
+type, score, difficulty, answer, feedback and learning-objective links while keeping deterministic
+scoring and all unselected questions in canonical `course.json`.

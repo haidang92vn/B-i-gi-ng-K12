@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createProject,
   generateCourse,
+  getProject,
   populateProjectFromGeneration,
+  regenerateProjectSlide,
+  updateCanonicalCourse,
   updateProjectDirection,
   updateProjectTitle,
   uploadProjectSource,
@@ -88,7 +91,7 @@ describe("Canonical project API", () => {
         id: "temporary-ai-id",
         revision: 1,
         objectives: [{ id: "o1", text: "Mục tiêu" }],
-        slides: [{ id: "s1", title: "Slide", status: "ai_draft" }],
+        slides: [{ id: "s1", title: "Slide", layout: "content", status: "ai_draft", blocks: [{ id: "b1", type: "text", text: "Nội dung", settings: {} }] }],
         question_bank: [{ id: "q1", question: "Câu hỏi" }],
       },
       objectives: ["Mục tiêu"],
@@ -113,5 +116,45 @@ describe("Canonical project API", () => {
     expect(patchBody.course.revision).toBe(4);
     expect(patchBody.course.metadata.direction).toBe("lesson");
     expect(patchBody.generation_id).toBe("run-1");
+  });
+
+  it("autosaves the edited canonical course against the current revision", async () => {
+    const edited = {
+      ...project.course,
+      objectives: [{ id: "o1", text: "Mục tiêu đã sửa" }],
+      slides: [{ id: "s1", title: "Slide đã sửa", layout: "callout", status: "edited" as const, blocks: [{ id: "b1", type: "text" as const, text: "Nội dung", settings: {} }] }],
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ...project, revision: 4, course: { ...edited, revision: 4 } }), { status: 200 }));
+
+    await updateCanonicalCourse(project, edited);
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(String(request.body));
+    expect(body.expected_revision).toBe(3);
+    expect(body.course.id).toBe("course-1");
+    expect(body.course.revision).toBe(4);
+    expect(body.course.slides[0].status).toBe("edited");
+  });
+
+  it("regenerates one slide without sending a credential secret", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ...project, revision: 4 }), { status: 200 }));
+
+    await regenerateProjectSlide(project, "slide/1", { source: "Nguồn bài học", provider: "gemini", credentialId: "credential-2" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/projects/course-1/slides/slide%2F1/regenerate");
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body.expected_revision).toBe(3);
+    expect(body.credential_id).toBe("credential-2");
+    expect(JSON.stringify(body)).not.toContain("secret");
+  });
+
+  it("reports revision conflicts and can reload the explicit server version", async () => {
+    const latest = { ...project, revision: 5, course: { ...project.course, revision: 5 } };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: { code: "COURSE_REVISION_CONFLICT", message: "The project was updated in another session." } }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(latest), { status: 200 }));
+
+    await expect(updateCanonicalCourse(project, project.course)).rejects.toThrow("phiên khác");
+    await expect(getProject(project.id)).resolves.toEqual(latest);
   });
 });

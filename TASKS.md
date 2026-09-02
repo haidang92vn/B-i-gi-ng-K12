@@ -171,6 +171,7 @@ Acceptance:
 - [x] Connect Step 1 to canonical draft creation and source upload, then verify refresh/reopen behavior.
 - [x] Migrate Step 2 direction selection and persist it through optimistic canonical revision updates.
 - [x] Migrate Step 3 AI provider/credential selection and populate the same canonical draft.
+- [x] Migrate Step 4 teacher review with objective/slide editing, autosave and targeted regeneration.
 - [ ] Migrate Steps 3–8 incrementally; remove a prototype screen only after its replacement passes acceptance tests.
 
 Acceptance for this first slice:

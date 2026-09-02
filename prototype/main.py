@@ -6,15 +6,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Any, List, Literal, Optional
 from pathlib import Path
 from datetime import datetime
-import io, zipfile, html, json, os, re
+import hashlib, io, os, zipfile, html, json, re
 from xml.etree import ElementTree
 from sqlalchemy import select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from prototype.course_models import Block, Course, Question, Slide, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
 from prototype.credentials import decrypt, encrypt
-from prototype.persistence import AICredential, AuthSession, ExportRecord, GenerationRun, MediaAsset, Project, ProjectShare, School, SchoolMembership, SharedQuestion, SourceMaterial, User, create_schema, make_session_factory
+from prototype.persistence import AICredential, AnalyticsImport, AuthSession, ExportRecord, GenerationRun, LearningAnalytics, MediaAsset, Project, ProjectShare, School, SchoolMembership, SharedQuestion, SourceMaterial, User, create_schema, make_session_factory
+from prototype.analytics import AnalyticsImportError, aggregate_events, aggregate_insights, normalize_rows, parse_report
 from prototype.providers import ProviderError, ProviderResult, media_provider_for, provider_for
 from prototype.media import SCORM_VIDEO_WARNING_BYTES, extension_for_mime, validate_media_upload, validate_media_url
 from prototype.sources import extract_text, validate_upload
@@ -121,6 +123,44 @@ class SchoolMemberResponse(BaseModel):
     email: str
     full_name: str | None
     role: Literal["school_admin", "teacher"]
+
+
+class AnalyticsImportResponse(BaseModel):
+    id: str
+    school_id: str
+    source_type: Literal["k12online_report"]
+    original_filename: str
+    row_count: int
+    accepted_row_count: int
+    rejected_row_count: int
+    error_summary: dict[str, int]
+    created_at: datetime | None
+
+
+class AnalyticsLessonSummary(BaseModel):
+    lesson_external_id: str
+    lesson_title: str | None
+    event_count: int
+    completion_ratio: float | None
+    score_ratio: float | None
+    correct_ratio: float | None
+
+
+class AnalyticsSummaryResponse(BaseModel):
+    event_count: int
+    learner_count: int
+    completion_ratio: float | None
+    score_ratio: float | None
+    correct_ratio: float | None
+    average_duration_minutes: float | None
+    lessons: list[AnalyticsLessonSummary]
+    privacy_note: str
+
+
+class AnalyticsInsightsResponse(BaseModel):
+    method: Literal["deterministic_aggregate"]
+    insights: list[str]
+    privacy_note: str
 
 
 class ProjectShareRequest(BaseModel):
@@ -298,6 +338,29 @@ def require_school_membership(db: Session, school_id: str, user: User) -> School
     if membership is None:
         raise HTTPException(status_code=404, detail="School not found.")
     return membership
+
+
+def analytics_pseudonym_key() -> bytes:
+    configured = os.getenv("ANALYTICS_PSEUDONYM_KEY")
+    if configured and configured != "replace_with_long_random_value":
+        return configured.encode("utf-8")
+    if os.getenv("APP_ENV", "development").lower() in {"production", "prod"}:
+        raise HTTPException(status_code=503, detail="ANALYTICS_PSEUDONYM_KEY is required in production.")
+    # This is intentionally public, development-only behavior. Production must configure a secret.
+    return b"ai-scorm-studio-development-analytics-key"
+
+
+def serialise_analytics_import(item: AnalyticsImport) -> AnalyticsImportResponse:
+    return AnalyticsImportResponse(
+        id=item.id, school_id=item.school_id, source_type="k12online_report", original_filename=item.original_filename,
+        row_count=item.row_count, accepted_row_count=item.accepted_row_count, rejected_row_count=item.rejected_row_count,
+        error_summary=dict(item.error_summary_json or {}), created_at=item.created_at,
+    )
+
+
+def analytics_summary_for_school(db: Session, school_id: str) -> dict[str, Any]:
+    events = db.scalars(select(LearningAnalytics).where(LearningAnalytics.school_id == school_id)).all()
+    return aggregate_events(events)
 
 
 def cleaned_learning_objectives(values: list[str]) -> list[str]:
@@ -493,6 +556,83 @@ def remove_school_member(school_id: str, member_user_id: str, user: User = Depen
             raise HTTPException(status_code=409, detail="A school must retain at least one administrator.")
     db.delete(membership)
     db.commit()
+
+
+@app.get("/api/v1/schools/{school_id}/analytics/imports", response_model=list[AnalyticsImportResponse])
+def list_analytics_imports(school_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    require_school_admin(db, school_id, user)
+    rows = db.scalars(
+        select(AnalyticsImport)
+        .where(AnalyticsImport.school_id == school_id)
+        .order_by(AnalyticsImport.created_at.desc())
+    ).all()
+    return [serialise_analytics_import(item) for item in rows]
+
+
+@app.post("/api/v1/schools/{school_id}/analytics/imports", response_model=AnalyticsImportResponse, status_code=status.HTTP_201_CREATED)
+async def import_k12online_analytics_report(
+    school_id: str,
+    upload: UploadFile = File(...),
+    user: User = Depends(current_teacher),
+    db: Session = Depends(get_db),
+):
+    """Import a CSV/XLSX report without retaining the original report or learner identifier."""
+    require_school_admin(db, school_id, user)
+    filename = Path(upload.filename or "k12online-report").name
+    if len(filename) > 255:
+        raise HTTPException(status_code=422, detail="Tên tệp quá dài.")
+    raw = await upload.read()
+    source_hash = hashlib.sha256(raw).hexdigest()
+    if db.scalar(select(AnalyticsImport.id).where(AnalyticsImport.school_id == school_id, AnalyticsImport.source_sha256 == source_hash)):
+        raise HTTPException(status_code=409, detail="Báo cáo này đã được nhập cho nhóm trường. Không lưu tệp gốc hoặc tạo bản sao dữ liệu.")
+    try:
+        raw_rows, mapping = parse_report(filename, upload.content_type, raw)
+        normalized, errors = normalize_rows(raw_rows, mapping, pseudonym_key=analytics_pseudonym_key())
+    except AnalyticsImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    item = AnalyticsImport(
+        school_id=school_id,
+        imported_by_user_id=user.id,
+        original_filename=filename,
+        source_sha256=source_hash,
+        row_count=len(raw_rows),
+        accepted_row_count=len(normalized),
+        rejected_row_count=len(raw_rows) - len(normalized),
+        mapping_json={field: header for field, header in mapping.items() if field != "learner_identifier"},
+        error_summary_json=errors,
+    )
+    db.add(item)
+    db.flush()
+    db.add_all([LearningAnalytics(import_id=item.id, school_id=school_id, **event) for event in normalized])
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Báo cáo này đã được nhập cho nhóm trường.") from exc
+    db.refresh(item)
+    return serialise_analytics_import(item)
+
+
+@app.get("/api/v1/schools/{school_id}/analytics/summary", response_model=AnalyticsSummaryResponse)
+def get_analytics_summary(school_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    # Teachers can see school-level aggregates, but never raw report rows or learner-level data.
+    require_school_membership(db, school_id, user)
+    summary = analytics_summary_for_school(db, school_id)
+    return AnalyticsSummaryResponse(
+        **summary,
+        privacy_note="Chỉ hiển thị số liệu tổng hợp theo trường/bài học; không trả về tên, email hay mã học viên gốc.",
+    )
+
+
+@app.get("/api/v1/schools/{school_id}/analytics/insights", response_model=AnalyticsInsightsResponse)
+def get_analytics_insights(school_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    require_school_membership(db, school_id, user)
+    summary = analytics_summary_for_school(db, school_id)
+    return AnalyticsInsightsResponse(
+        method="deterministic_aggregate",
+        insights=aggregate_insights(summary),
+        privacy_note="Gợi ý được tính từ chỉ số tổng hợp ẩn danh, không dùng để chấm điểm, xếp loại hoặc ra quyết định tự động về học sinh/giáo viên.",
+    )
 
 
 @app.get("/api/v1/shared-questions", response_model=list[SharedQuestionResponse])

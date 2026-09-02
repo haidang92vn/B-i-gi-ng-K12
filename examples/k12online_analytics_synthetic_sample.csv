@@ -1,0 +1,9 @@
+source_row_id,learner_pseudonym,course_external_id,course_title,class_code,lesson_external_id,lesson_title,activity_date,duration_minutes,completion_percent,completion_status,score,max_score,attempt_number,correct_answers,total_questions,correct_rate
+evt-001,HS-001,TOAN5-2026,Toán 5 - Phân số,5A,PS-01,Khái niệm phân số,2026-08-21T08:10:00Z,12,100,completed,8,10,1,8,10,80
+evt-002,HS-002,TOAN5-2026,Toán 5 - Phân số,5A,PS-01,Khái niệm phân số,2026-08-21T08:24:00Z,14,100,completed,7,10,1,7,10,70
+evt-003,HS-003,TOAN5-2026,Toán 5 - Phân số,5B,PS-01,Khái niệm phân số,2026-08-21T09:05:00Z,18,60,in_progress,5,10,1,5,10,50
+evt-004,HS-004,TOAN5-2026,Toán 5 - Phân số,5B,PS-02,Phân số bằng nhau,2026-08-22T08:30:00Z,19,100,completed,9,10,1,9,10,90
+evt-005,HS-001,TOAN5-2026,Toán 5 - Phân số,5A,PS-02,Phân số bằng nhau,2026-08-22T08:50:00Z,16,100,completed,8,10,1,8,10,80
+evt-006,HS-002,TOAN5-2026,Toán 5 - Phân số,5A,PS-02,Phân số bằng nhau,2026-08-22T09:10:00Z,17,40,in_progress,6,10,1,6,10,60
+evt-007,HS-003,TOAN5-2026,Toán 5 - Phân số,5B,PS-02,Phân số bằng nhau,2026-08-22T09:25:00Z,15,60,in_progress,5,10,2,5,10,50
+evt-008,HS-004,TOAN5-2026,Toán 5 - Phân số,5B,PS-01,Khái niệm phân số,2026-08-23T08:20:00Z,15,100,completed,9,10,2,9,10,90

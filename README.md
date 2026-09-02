@@ -158,6 +158,15 @@ R2-compatible object store and is packaged under `assets/` during SCORM export; 
 remain external. File type/signature/size checks, rights confirmation and video ZIP warnings are
 included. See [docs/MEDIA_TTS.md](docs/MEDIA_TTS.md).
 
+## Milestone 12.5: K12Online analytics (report import)
+
+K12Online public guidance documents report export, but no public analytics API/webhook contract.
+The demo therefore imports a bounded CSV UTF-8 or XLSX report only through a school administrator.
+It never retains report bytes or original learner identifiers: identifiers are HMAC-pseudonymized
+before normalized storage, and teachers see school/lesson aggregates only. The initial suggestions
+are deterministic and non-binding; no AI provider receives learner data. See
+[docs/ANALYTICS.md](docs/ANALYTICS.md) and [docs/K12ONLINE_ANALYTICS_DISCOVERY.md](docs/K12ONLINE_ANALYTICS_DISCOVERY.md).
+
 ## Cấu trúc repository thực tế
 
 ```text
@@ -178,6 +187,7 @@ docs/
   DATABASE.md                    Data model đề xuất
   DECISIONS.md                   Quyết định kiến trúc/sản phẩm đã chốt
   DEPLOYMENT.md                  VPS + Docker + R2 + backup
+  ANALYTICS.md                   K12Online report import + privacy contract
   SCORM.md                       SCORM 2004/K12Online contract
   SECURITY.md                    Quy tắc bảo mật
   UX_FLOW.md                     UX flow 8 bước

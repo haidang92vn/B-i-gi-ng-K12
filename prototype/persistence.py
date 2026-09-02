@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.types import JSON
@@ -156,6 +156,59 @@ class MediaAsset(Base):
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AnalyticsImport(Base):
+    """Audit metadata for a privacy-preserving K12Online report import.
+
+    The original report bytes are intentionally not retained: source reports can contain
+    learner identifiers, while normalized event rows keep only an HMAC-derived token.
+    """
+
+    __tablename__ = "analytics_imports"
+    __table_args__ = (UniqueConstraint("school_id", "source_sha256", name="uq_analytics_imports_school_source"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    school_id: Mapped[str] = mapped_column(String(36), ForeignKey("schools.id"), index=True)
+    imported_by_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    source_type: Mapped[str] = mapped_column(String(40), default="k12online_report")
+    original_filename: Mapped[str] = mapped_column(String(255))
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    accepted_row_count: Mapped[int] = mapped_column(Integer, default=0)
+    rejected_row_count: Mapped[int] = mapped_column(Integer, default=0)
+    mapping_json: Mapped[dict] = mapped_column(JsonDocument, default=dict)
+    error_summary_json: Mapped[dict] = mapped_column(JsonDocument, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LearningAnalytics(Base):
+    """One normalized learning event; no student name, email or source identifier is stored."""
+
+    __tablename__ = "learning_analytics"
+    __table_args__ = (UniqueConstraint("import_id", "row_number", name="uq_learning_analytics_import_row"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    import_id: Mapped[str] = mapped_column(String(36), ForeignKey("analytics_imports.id"), index=True)
+    school_id: Mapped[str] = mapped_column(String(36), ForeignKey("schools.id"), index=True)
+    row_number: Mapped[int] = mapped_column(Integer)
+    learner_token: Mapped[str] = mapped_column(String(64), index=True)
+    course_external_id: Mapped[str] = mapped_column(String(200), index=True)
+    course_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    class_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    lesson_external_id: Mapped[str] = mapped_column(String(200), index=True)
+    lesson_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    duration_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completion_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completion_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    attempt_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    correct_answers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_questions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    correct_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 class AICredential(Base):
     __tablename__ = "ai_credentials"

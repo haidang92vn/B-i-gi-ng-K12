@@ -33,6 +33,7 @@ architecture. It is **not yet the production application**.
 - School teams support explicit school administrators and teacher members. Project owners can share a lesson only with a registered teacher in a common school, as `viewer` or `editor`; the prototype UI locks viewer editing while retaining player, quality-check and SCORM-export access.
 - The school shared-question library keeps subject, grade, topic, learning objectives, answer, difficulty and reviewer attribution. Teachers submit a draft from an edited course question; school admins publish or reject it, and only published copies can be added back into a project.
 - Media/TTS supports an explicit teacher preview before attachment. Media bytes live in R2-compatible storage and course slides keep only `asset_id` references; upload validation, rights confirmation, private preview, SCORM asset packaging and large-video warnings are implemented. OpenAI and Gemini remain provider adapters, with Mock AI available for the demo.
+- K12Online analytics has a privacy-preserving report-import prototype: a school admin imports bounded CSV UTF-8/XLSX data, original report bytes are discarded, learner identifiers become HMAC tokens, and the dashboard shows school/lesson aggregates only. Deterministic suggestions use aggregate metrics only; no AI provider receives learner-level data.
 - Architecture, database, API, security, deployment and SCORM design documents.
 - Repository validator, unit smoke tests and GitHub Actions validation workflow.
 
@@ -42,6 +43,6 @@ architecture. It is **not yet the production application**.
 - Full quiz renderers for matching/ordering/drag-drop/image interactions.
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
 - A production Next.js frontend and actual background-job handlers (the current Compose worker only validates Redis connectivity).
-- Analytics dashboard/importer. Public K12Online documentation confirms report export but does not expose a public analytics API/webhook contract; see `docs/K12ONLINE_ANALYTICS_DISCOVERY.md`.
+- A real de-identified K12Online export/field dictionary, school retention approval and any official API/webhook specification. The generic report-import prototype must be mapped and accepted before live use; see `docs/ANALYTICS.md`.
 
 Follow `TASKS.md` and the numbered files in `prompts/` to implement these in order.

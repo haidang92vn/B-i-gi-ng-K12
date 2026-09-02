@@ -41,6 +41,20 @@ School admins manage membership. Project owners can share only with a registered
 shared school team, with `viewer` or `editor` access. Readers receive no ownership-changing
 endpoints; unauthorized access is returned as `404`.
 
+## K12Online report analytics
+
+```text
+POST /api/v1/schools/{school_id}/analytics/imports
+GET  /api/v1/schools/{school_id}/analytics/imports
+GET  /api/v1/schools/{school_id}/analytics/summary
+GET  /api/v1/schools/{school_id}/analytics/insights
+```
+
+The POST accepts a `multipart/form-data` `upload` field containing CSV UTF-8 or XLSX. Only a
+school admin can import/list reports. Summary and insight endpoints return school/lesson
+aggregates to school members; they never expose learner rows or source identifiers. See
+`docs/ANALYTICS.md` for the data contract and retention rules.
+
 ## Shared question library
 ```text
 GET  /api/v1/shared-questions?school_id={school_id}

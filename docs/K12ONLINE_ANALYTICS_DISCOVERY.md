@@ -42,11 +42,13 @@ access-controlled to the appropriate school, idempotent by source file hash and 
 student identifiers should be pseudonymized before AI receives any aggregate summary; AI must
 not make grades or automated high-stakes decisions.
 
-## Recommended implementation sequence after approval
+## Implementation status after approval
 
-1. Receive de-identified sample exports and map column names.
-2. Implement CSV/XLSX upload, validation, normalization and import audit.
-3. Build school/teacher dashboard for completion, score, time-on-task and question accuracy.
-4. Add deterministic flags; provide AI only aggregate narrative suggestions.
-5. Add an API/webhook adapter only after an official specification, consent/roles and test tenant
+1. A fully synthetic CSV/XLSX sample is supplied for development only; it is not a real K12Online
+   report. A de-identified authorized sample and field dictionary are still required before a live
+   school onboarding.
+2. The prototype now implements CSV/XLSX validation, HMAC pseudonymization, idempotent audit
+   metadata, normalized storage and an aggregate-only school dashboard.
+3. Deterministic aggregate suggestions are available; no AI provider receives learner data.
+4. Add an API/webhook adapter only after an official specification, consent/roles and test tenant
    are supplied by K12Online/Viettel.

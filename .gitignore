@@ -15,6 +15,7 @@ build/
 coverage/
 .DS_Store
 *.log
+*.inspect.ndjson
 *.sqlite3
 storage/
 tmp/

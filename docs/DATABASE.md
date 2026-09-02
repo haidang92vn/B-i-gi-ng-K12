@@ -138,6 +138,17 @@ Do not require normalization in Milestone 01. Add later if cross-project reuse i
 Shared questions are copies of reviewed question content. Adding one to a project generates a
 fresh canonical question id; it does not create a mutable cross-project reference.
 
+## analytics_imports / learning_analytics
+
+`analytics_imports` stores the school, importing administrator, filename, SHA-256 source
+fingerprint, accepted/rejected row counts, header mapping and aggregate error counts. It does not
+store report bytes. `(school_id, source_sha256)` is unique to make imports idempotent.
+
+`learning_analytics` stores normalized event-level learning metrics: an HMAC learner token,
+course/lesson/class identifiers, timestamps, duration, completion, score, attempt and question
+accuracy fields. It does not contain student name, email or source identifier. `(import_id,
+row_number)` is unique. Migration `20260902_15_learning_analytics.py` creates both tables.
+
 ## export_jobs
 - id
 - project_id

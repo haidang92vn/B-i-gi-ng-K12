@@ -25,6 +25,15 @@ Shared-question drafts are visible only to their author and school admins. Publi
 requires a school-admin membership checked server-side. A published question is copied into a
 course with a new id, so editing one course cannot silently modify content in another course.
 
+## Analytics imports
+
+Only a school administrator may import or list K12Online-style reports. The importer accepts only
+bounded CSV UTF-8/XLSX input, parses it in memory, rejects a name-only identifier mapping and does
+not persist raw report bytes. A dedicated `ANALYTICS_PSEUDONYM_KEY` HMACs learner identifiers
+before normalized rows are stored. All school members receive aggregates only; learner-level data
+and source identifiers are not API responses or AI inputs. AI summaries, if approved later, must
+receive aggregates only and must not make a high-stakes decision.
+
 ## Files
 - Restrict allowed file types and sizes.
 - Generate server-side object keys; do not trust raw filenames as paths.

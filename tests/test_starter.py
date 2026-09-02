@@ -12,6 +12,7 @@ import zipfile
 
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
+from openpyxl import Workbook
 from prototype.course_models import Block, Question, Slide, new_course
 from prototype.quiz_scoring import score_question
 from prototype.scorm_runtime import FakeScorm2004API, ScormRuntime
@@ -427,6 +428,69 @@ class PrototypeTests(unittest.TestCase):
         self.assertEqual(admin_draft.status_code, 201, admin_draft.text)
         self.assertEqual(admin.post(f"/api/v1/shared-questions/{admin_draft.json()['id']}/submit").status_code, 200)
         self.assertEqual(admin.post(f"/api/v1/shared-questions/{admin_draft.json()['id']}/review", json={"decision": "published"}).status_code, 403)
+
+    def test_school_analytics_import_is_anonymous_aggregate_only_and_idempotent(self):
+        admin = TestClient(self.module.app)
+        teacher = TestClient(self.module.app)
+        outsider = TestClient(self.module.app)
+        admin_email = f"analytics-admin-{uuid4()}@example.test"
+        teacher_email = f"analytics-teacher-{uuid4()}@example.test"
+        for client, email in ((admin, admin_email), (teacher, teacher_email), (outsider, f"analytics-outsider-{uuid4()}@example.test")):
+            response = client.post("/api/v1/auth/register", json={"email": email, "password": "a-secure-test-password"})
+            self.assertEqual(response.status_code, 201, response.text)
+        school = admin.post("/api/v1/schools", json={"name": f"Trường analytics {uuid4()}"}).json()
+        self.assertEqual(admin.put(f"/api/v1/schools/{school['id']}/members", json={"email": teacher_email, "role": "teacher"}).status_code, 200)
+        report = (
+            "learner_pseudonym,course_external_id,lesson_external_id,completion_percent,score,max_score,correct_answers,total_questions\n"
+            "HS-001,TOAN5,PS-01,100,8,10,8,10\n"
+            "HS-002,TOAN5,PS-01,50,6,10,6,10\n"
+        ).encode("utf-8")
+        created = admin.post(
+            f"/api/v1/schools/{school['id']}/analytics/imports",
+            files={"upload": ("report.csv", report, "text/csv")},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["accepted_row_count"], 2)
+        self.assertEqual(created.json()["rejected_row_count"], 0)
+        self.assertNotIn("HS-001", created.text)
+        duplicate = admin.post(f"/api/v1/schools/{school['id']}/analytics/imports", files={"upload": ("report.csv", report, "text/csv")})
+        self.assertEqual(duplicate.status_code, 409, duplicate.text)
+        self.assertEqual(teacher.get(f"/api/v1/schools/{school['id']}/analytics/imports").status_code, 403)
+        self.assertEqual(outsider.get(f"/api/v1/schools/{school['id']}/analytics/summary").status_code, 404)
+        summary = teacher.get(f"/api/v1/schools/{school['id']}/analytics/summary")
+        self.assertEqual(summary.status_code, 200, summary.text)
+        self.assertEqual(summary.json()["learner_count"], 2)
+        self.assertEqual(summary.json()["completion_ratio"], 0.75)
+        self.assertNotIn("HS-001", summary.text)
+        insights = teacher.get(f"/api/v1/schools/{school['id']}/analytics/insights")
+        self.assertEqual(insights.status_code, 200, insights.text)
+        self.assertEqual(insights.json()["method"], "deterministic_aggregate")
+        with self.module.SessionLocal() as db:
+            event = db.scalar(self.module.select(self.module.LearningAnalytics).where(self.module.LearningAnalytics.school_id == school["id"]))
+            self.assertIsNotNone(event)
+            self.assertNotEqual(event.learner_token, "HS-001")
+            self.assertEqual(len(event.learner_token), 64)
+
+    def test_school_analytics_accepts_xlsx_and_rejects_name_only_headers(self):
+        admin = TestClient(self.module.app)
+        response = admin.post("/api/v1/auth/register", json={"email": f"analytics-xlsx-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        self.assertEqual(response.status_code, 201, response.text)
+        school = admin.post("/api/v1/schools", json={"name": f"Trường XLSX {uuid4()}"}).json()
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["learner_pseudonym", "course_external_id", "lesson_external_id", "activity_date", "completion_percent"])
+        sheet.append(["HS-ANON-01", "KHOA-01", "BAI-01", "2026-08-21", 100])
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        imported = admin.post(
+            f"/api/v1/schools/{school['id']}/analytics/imports",
+            files={"upload": ("report.xlsx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        self.assertEqual(imported.status_code, 201, imported.text)
+        bad = b"Ho ten,course_external_id,lesson_external_id\nNguyen Van A,C1,L1\n"
+        rejected = admin.post(f"/api/v1/schools/{school['id']}/analytics/imports", files={"upload": ("bad.csv", bad, "text/csv")})
+        self.assertEqual(rejected.status_code, 422, rejected.text)
+        self.assertIn("learner_identifier", rejected.text)
 
 
 if __name__ == "__main__":

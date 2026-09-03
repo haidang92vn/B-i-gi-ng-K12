@@ -8,6 +8,7 @@ import os
 import re
 import zipfile
 from typing import Any, Literal
+from uuid import uuid4
 from xml.etree import ElementTree
 
 from fastapi import FastAPI, HTTPException
@@ -113,6 +114,13 @@ class ExportPayload(StrictModel):
     course: Course
 
 
+class GenerationPayload(StrictModel):
+    title: str = Field(min_length=1, max_length=300)
+    source: str = Field(min_length=1, max_length=24_000)
+    direction: Literal["lesson", "review", "advanced"]
+    provider: Literal["mock", "openai", "gemini"] = "mock"
+
+
 def _safe_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
@@ -134,6 +142,39 @@ def quality_report(course: Course) -> dict[str, object]:
         if not question.question.strip() or question.correct_answer in (None, "", []): findings.append({"code": "QUESTION_INCOMPLETE", "severity": "warning", "scope": "question", "item_id": question.id, "title": "Câu hỏi chưa hoàn chỉnh", "message": "Thiếu nội dung hoặc đáp án đúng.", "suggestion": "Bổ sung câu hỏi, đáp án và kiểm tra cách chấm."})
     warnings = sum(item["severity"] == "warning" for item in findings)
     return {"course_id": course.id, "revision": course.revision, "score": max(0, 100 - warnings * 10), "summary": {"warnings": warnings, "info": 0, "checked_slides": len(course.slides), "checked_questions": len(course.question_bank)}, "findings": findings, "blocking": False}
+
+
+def _sentences(source: str) -> list[str]:
+    values = [item.strip() for item in re.split(r"(?<=[.!?。])\s+|[;\n]+", re.sub(r"\s+", " ", source)) if len(item.strip()) > 12]
+    return values or ["Giáo viên cần bổ sung ngữ cảnh rõ ràng cho nội dung bài học."]
+
+
+def mock_course(payload: GenerationPayload) -> Course:
+    sections = {"lesson": ["Khởi động", "Kiến thức trọng tâm", "Ví dụ – vận dụng", "Củng cố"], "review": ["Gợi nhớ kiến thức", "Hệ thống hóa", "Luyện tập", "Tổng kết"], "advanced": ["Đặt vấn đề", "Mở rộng kiến thức", "Thử thách vận dụng", "Kết luận"]}[payload.direction]
+    source = _sentences(payload.source)
+    return Course(id=str(uuid4()), revision=1, metadata=Metadata(title=payload.title, direction=payload.direction), objectives=[{"id": "o1", "text": f"Nêu được các ý chính của chủ đề “{payload.title}”."}, {"id": "o2", "text": "Vận dụng kiến thức để trả lời câu hỏi và xử lý tình huống."}], slides=[Slide(id=f"s{index + 1}", title=title, layout="content", status="ai_draft", blocks=[Block(id=f"s{index + 1}-text", type="text", text=f"{source[(index * 2) % len(source)]}\n\n{source[(index * 2 + 1) % len(source)]}")], speaker_notes="AI gợi ý – giáo viên cần kiểm tra trước khi xuất.") for index, title in enumerate(sections)], question_bank=[Question(id=f"q{index + 1}", type="single", question=f"Câu {index + 1}: Nhận định nào phù hợp nhất với nội dung “{item[:120].rstrip('.')}”?", selected=index < 4, score=1, difficulty="understand", correct_answer="Phương án đúng theo nội dung bài học", options=["Phương án đúng theo nội dung bài học", "Phương án gây nhiễu 1", "Phương án gây nhiễu 2", "Phương án gây nhiễu 3"], objective_ids=["o1"]) for index, item in enumerate((source * 8)[:8])], theme=Theme(id="default", primary_color="#3157d5"), navigation=Navigation(mode="free", show_menu=True, show_progress=True), completion=Completion(viewed_percent=90, passing_score=70, require_quiz=True), scorm=Scorm(standard="SCORM_2004", preset="k12online", edition="4th Edition", resume=True, track_score=True, track_completion=True, track_success=True))
+
+
+def configured_providers() -> dict[str, dict[str, object]]:
+    return {"mock": {"available": True, "model": "mock", "notice": "Không gửi nội dung ra dịch vụ bên ngoài."}, "openai": {"available": bool(os.getenv("OPENAI_API_KEY")), "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini")}, "gemini": {"available": bool(os.getenv("GEMINI_API_KEY")), "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash")}}
+
+
+def provider_course(payload: GenerationPayload) -> tuple[Course, str]:
+    status = configured_providers()[payload.provider]
+    if not status["available"]: raise ValueError(f"{payload.provider} chưa được cấu hình trên máy chủ.")
+    if payload.provider == "mock": return mock_course(payload), "mock"
+    schema = Course.model_json_schema()
+    prompt = f"Tạo một course.json hợp lệ bằng tiếng Việt theo schema, không thêm markdown. Tiêu đề: {payload.title}. Định hướng: {payload.direction}. Nguồn: {payload.source}"
+    try:
+        if payload.provider == "openai":
+            from openai import OpenAI
+            response = OpenAI(api_key=os.environ["OPENAI_API_KEY"]).responses.create(model=str(status["model"]), input=prompt, store=False, text={"format": {"type": "json_schema", "name": "course", "strict": False, "schema": schema}})
+            return Course.model_validate(json.loads(response.output_text)), str(status["model"])
+        from google import genai
+        response = genai.Client(api_key=os.environ["GEMINI_API_KEY"]).models.generate_content(model=str(status["model"]), contents=prompt, config={"response_mime_type": "application/json", "response_json_schema": schema})
+        return Course.model_validate(json.loads(response.text)), str(status["model"])
+    except Exception as exc:
+        raise RuntimeError("AI không tạo được course.json hợp lệ. Hãy thử lại hoặc dùng Mock AI.") from exc
 
 
 def runtime_js() -> str:
@@ -194,6 +235,18 @@ if origins: app.add_middleware(CORSMiddleware, allow_origins=origins, allow_meth
 
 @app.get("/healthz")
 def healthz(): return {"status": "ok", "mode": "stateless"}
+
+
+@app.get("/api/serverless/providers")
+def providers(): return configured_providers()
+
+
+@app.post("/api/serverless/generate")
+def generate(payload: GenerationPayload):
+    try: course, model = provider_course(payload)
+    except ValueError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc: raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"course": course.model_dump(mode="json"), "provider": payload.provider, "model": model, "notice": "AI tạo nháp; giáo viên phải duyệt trước khi xuất."}
 
 
 @app.post("/api/serverless/quality")

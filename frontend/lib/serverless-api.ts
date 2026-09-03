@@ -1,5 +1,8 @@
 import type { CanonicalCourse, QualityReport, ScormExport } from "@/lib/api";
 
+export type ServerlessProvider = "mock" | "openai" | "gemini";
+export type ProviderStatus = Record<ServerlessProvider, { available: boolean; model: string; notice?: string }>;
+
 async function errorMessage(response: Response) {
   try {
     const body = await response.json() as { detail?: string };
@@ -11,6 +14,16 @@ async function request(path: string, body: unknown) {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!response.ok) throw new Error(await errorMessage(response));
   return response;
+}
+
+export async function serverlessProviders(): Promise<ProviderStatus> {
+  const response = await fetch("/api/serverless/providers");
+  if (!response.ok) throw new Error(await errorMessage(response));
+  return response.json() as Promise<ProviderStatus>;
+}
+
+export async function serverlessGenerate(input: { title: string; source: string; direction: CanonicalCourse["metadata"]["direction"]; provider: ServerlessProvider }): Promise<{ course: CanonicalCourse; provider: ServerlessProvider; model: string }> {
+  return (await request("/api/serverless/generate", input)).json() as Promise<{ course: CanonicalCourse; provider: ServerlessProvider; model: string }>;
 }
 
 export async function serverlessQuality(course: CanonicalCourse): Promise<QualityReport> {

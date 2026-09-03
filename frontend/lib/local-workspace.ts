@@ -143,6 +143,10 @@ export async function generateLocalMockCourse(project: Project, source: string):
   return updateLocalCanonicalCourse(project, course);
 }
 
+export async function saveGeneratedCourse(project: Project, course: CanonicalCourse): Promise<Project> {
+  return updateLocalCanonicalCourse(project, course);
+}
+
 export async function regenerateLocalSlide(project: Project, slideId: string, input: { source: string; provider?: string; credentialId?: string }): Promise<Project> {
   const parts = sentences(input.source);
   const course = clone(project.course);

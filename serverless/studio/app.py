@@ -1,0 +1,213 @@
+"""Self-contained FastAPI app: no database, session, storage or provider key."""
+from __future__ import annotations
+
+import html
+import io
+import json
+import os
+import re
+import zipfile
+from typing import Any, Literal
+from xml.etree import ElementTree
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
+
+MAX_ZIP_BYTES = 4 * 1024 * 1024
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class Metadata(StrictModel):
+    title: str = Field(min_length=1, max_length=300)
+    direction: Literal["lesson", "review", "advanced"]
+    language: str = "vi-VN"
+    subject: str | None = None
+    grade: str | None = None
+    teacher_name: str | None = None
+    school_name: str | None = None
+
+
+class Block(StrictModel):
+    id: str
+    type: Literal["heading", "text", "image", "audio", "video", "callout", "quiz", "embed"]
+    text: str | None = None
+    asset_id: str | None = None
+    question_id: str | None = None
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class Slide(StrictModel):
+    id: str
+    title: str
+    layout: str
+    status: Literal["ai_draft", "edited", "approved"]
+    blocks: list[Block]
+    speaker_notes: str | None = None
+
+
+class Question(StrictModel):
+    id: str
+    type: Literal["single", "multiple", "truefalse", "fill", "matching", "ordering", "dragdrop", "image"]
+    question: str
+    selected: bool
+    score: float = Field(ge=0)
+    difficulty: Literal["recognize", "understand", "apply", "advanced"]
+    correct_answer: Any
+    options: list[str] = Field(default_factory=list)
+    explanation: str | None = None
+    feedback_correct: str | None = None
+    feedback_incorrect: str | None = None
+    objective_ids: list[str] = Field(default_factory=list)
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class Theme(StrictModel):
+    id: str
+    primary_color: str | None = None
+    font_family: str | None = None
+    logo_asset_id: str | None = None
+
+
+class Navigation(StrictModel):
+    mode: Literal["free", "sequential", "restricted"]
+    show_menu: bool
+    show_progress: bool
+
+
+class Completion(StrictModel):
+    viewed_percent: int = Field(ge=0, le=100)
+    passing_score: int = Field(ge=0, le=100)
+    require_quiz: bool
+
+
+class Scorm(StrictModel):
+    standard: Literal["SCORM_2004"]
+    preset: Literal["k12online", "custom"]
+    resume: bool
+    track_score: bool
+    track_completion: bool
+    track_success: bool
+    edition: str | None = None
+
+
+class Course(StrictModel):
+    schema_version: Literal["1.0.0"] = "1.0.0"
+    id: str
+    revision: int = Field(ge=1)
+    metadata: Metadata
+    objectives: list[dict[str, str]]
+    slides: list[Slide]
+    question_bank: list[Question]
+    theme: Theme
+    navigation: Navigation
+    completion: Completion
+    scorm: Scorm
+
+
+class ExportPayload(StrictModel):
+    course: Course
+
+
+def _safe_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def _assert_serverless_course(course: Course) -> None:
+    if any(block.asset_id or block.type in {"image", "audio", "video"} for slide in course.slides for block in slide.blocks):
+        raise ValueError("Chế độ serverless không đóng gói ảnh, audio hoặc video. Hãy bỏ media trước khi xuất.")
+
+
+def quality_report(course: Course) -> dict[str, object]:
+    findings: list[dict[str, object]] = []
+    for slide in course.slides:
+        text = " ".join(block.text or "" for block in slide.blocks if block.type in {"heading", "text", "callout"}).strip()
+        if slide.status != "approved": findings.append({"code": "SLIDE_NOT_APPROVED", "severity": "warning", "scope": "slide", "item_id": slide.id, "title": "Slide chưa được duyệt", "message": f"{slide.title} vẫn ở trạng thái nháp hoặc đang sửa.", "suggestion": "Kiểm tra chuyên môn rồi đánh dấu Đã duyệt."})
+        if len(text) < 20: findings.append({"code": "SLIDE_TOO_SHORT", "severity": "warning", "scope": "slide", "item_id": slide.id, "title": "Slide thiếu nội dung", "message": f"{slide.title} có quá ít văn bản.", "suggestion": "Bổ sung nội dung để học sinh có thể tự học."})
+    selected = [question for question in course.question_bank if question.selected]
+    if not selected: findings.append({"code": "NO_QUIZ", "severity": "warning", "scope": "course", "item_id": None, "title": "Chưa có quiz", "message": "Không có câu hỏi nào được chọn.", "suggestion": "Chọn ít nhất một câu hỏi ở Bước 5."})
+    for question in selected:
+        if not question.question.strip() or question.correct_answer in (None, "", []): findings.append({"code": "QUESTION_INCOMPLETE", "severity": "warning", "scope": "question", "item_id": question.id, "title": "Câu hỏi chưa hoàn chỉnh", "message": "Thiếu nội dung hoặc đáp án đúng.", "suggestion": "Bổ sung câu hỏi, đáp án và kiểm tra cách chấm."})
+    warnings = sum(item["severity"] == "warning" for item in findings)
+    return {"course_id": course.id, "revision": course.revision, "score": max(0, 100 - warnings * 10), "summary": {"warnings": warnings, "info": 0, "checked_slides": len(course.slides), "checked_questions": len(course.question_bank)}, "findings": findings, "blocking": False}
+
+
+def runtime_js() -> str:
+    return '''let API_1484_11=null;function findAPI(w){for(let i=0;i<10&&w;i++){if(w.API_1484_11)return w.API_1484_11;w=w.parent}return null}function Initialize(){API_1484_11=findAPI(window);try{return API_1484_11?API_1484_11.Initialize(""):"false"}catch(e){return"false"}}function SetValue(k,v){try{return API_1484_11?API_1484_11.SetValue(k,v):"false"}catch(e){return"false"}}function Commit(){try{return API_1484_11?API_1484_11.Commit(""):"false"}catch(e){return"false"}}function Terminate(){try{return API_1484_11?API_1484_11.Terminate(""):"false"}catch(e){return"false"}}window.addEventListener("load",Initialize);window.addEventListener("beforeunload",Terminate);'''
+
+
+def manifest(title: str) -> str:
+    safe = html.escape(title)
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="AI_SCORM_STUDIO" xmlns="http://www.imsglobal.org/xsd/imscp_v1p1" xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_v1p3" xmlns:imsss="http://www.imsglobal.org/xsd/imsss"><metadata><schema>ADL SCORM</schema><schemaversion>2004 4th Edition</schemaversion></metadata><organizations default="ORG-1"><organization identifier="ORG-1"><title>{safe}</title><item identifier="ITEM-1" identifierref="RES-1"><title>{safe}</title></item></organization></organizations><resources><resource identifier="RES-1" type="webcontent" adlcp:scormType="sco" href="index.html"><file href="index.html"/><file href="runtime.js"/></resource></resources></manifest>'''
+
+
+def render_html(course: Course) -> str:
+    title = html.escape(course.metadata.title)
+    payload = _safe_json(course.model_dump(mode="json"))
+    return f'''<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title><style>body{{margin:0;font:18px system-ui;background:#f4f7fb;color:#10233f}}main{{max-width:920px;margin:0 auto;padding:32px}}article{{background:#fff;border-radius:16px;padding:32px;box-shadow:0 8px 30px #10233f18}}.eyebrow{{color:#3157d5;font-weight:700;font-size:13px}}button{{padding:10px 16px;margin:16px 8px 0 0}}#progress{{font-size:14px;color:#52647a}}</style></head><body><main><p class="eyebrow">AI SCORM STUDIO • SCORM 2004</p><article id="player"></article><button id="back">← Trước</button><button id="next">Tiếp →</button><p id="progress"></p></main><script src="runtime.js"></script><script>const course={payload};let i=0;const selected=course.question_bank.filter(q=>q.selected);function render(){{const slide=course.slides[i];document.querySelector('#player').innerHTML=`<h1>${{slide.title}}</h1>${{slide.blocks.filter(b=>['heading','text','callout'].includes(b.type)).map(b=>`<p>${{String(b.text||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')}}</p>`).join('')}}${{i===course.slides.length-1&&selected.length?`<h2>Tự kiểm tra</h2><p>${{selected[0].question}}</p>`:''}}`;document.querySelector('#progress').textContent=`Slide ${{i+1}}/${{course.slides.length}}`;document.querySelector('#back').disabled=i===0;document.querySelector('#next').disabled=i===course.slides.length-1;SetValue('cmi.location',String(i));if(i===course.slides.length-1){{SetValue('cmi.progress_measure','1');SetValue('cmi.completion_status','completed');Commit()}}}}document.querySelector('#back').onclick=()=>{{i--;render()}};document.querySelector('#next').onclick=()=>{{i++;render()}};render();</script></body></html>'''
+
+
+def validate(files: dict[str, bytes], course: Course) -> list[str]:
+    required = {"imsmanifest.xml", "index.html", "runtime.js"}
+    errors = [f"Thiếu tệp {name}." for name in sorted(required - set(files))]
+    for name in files:
+        if not name or "\\" in name or name.startswith("/") or ".." in name.split("/"): errors.append(f"Đường dẫn không an toàn: {name}.")
+    try:
+        root = ElementTree.fromstring(files["imsmanifest.xml"])
+        version = next((node.text for node in root.iter() if node.tag.endswith("schemaversion")), None)
+        resources = [node for node in root.iter() if node.tag.endswith("resource")]
+        sco = [node for node in resources if node.attrib.get("{http://www.adlnet.org/xsd/adlcp_v1p3}scormType") == "sco"]
+        hrefs = {node.attrib.get("href") for node in root.iter() if node.attrib.get("href")}
+        if version != "2004 4th Edition": errors.append("Manifest phải là SCORM 2004 4th Edition.")
+        if len(sco) != 1: errors.append("Manifest cần đúng một SCO resource.")
+        if not {"index.html", "runtime.js"}.issubset(hrefs): errors.append("Manifest phải tham chiếu index.html và runtime.js.")
+    except ElementTree.ParseError: errors.append("imsmanifest.xml không hợp lệ.")
+    if b"API_1484_11" not in files["runtime.js"] or b"Initialize" not in files["runtime.js"]: errors.append("Thiếu SCORM 2004 runtime.")
+    if not 0 <= course.completion.passing_score <= 100: errors.append("Điểm đạt không hợp lệ.")
+    return errors
+
+
+def make_zip(course: Course) -> tuple[bytes, str]:
+    _assert_serverless_course(course)
+    files = {"imsmanifest.xml": manifest(course.metadata.title).encode(), "index.html": render_html(course).encode(), "runtime.js": runtime_js().encode()}
+    errors = validate(files, course)
+    if errors: raise ValueError("; ".join(errors))
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in files.items(): archive.writestr(name, content)
+    package = buffer.getvalue()
+    if len(package) > MAX_ZIP_BYTES: raise ValueError("ZIP vượt giới hạn 4 MB của chế độ serverless.")
+    if zipfile.ZipFile(io.BytesIO(package)).testzip(): raise ValueError("ZIP SCORM bị lỗi.")
+    name = re.sub(r"[^A-Za-z0-9_-]+", "_", course.metadata.title).strip("_") or "bai_giang"
+    return package, f"{name}_SCORM2004.zip"
+
+
+app = FastAPI(title="AI SCORM Studio stateless API")
+origins = [item.strip() for item in os.getenv("ALLOWED_ORIGINS", "").split(",") if item.strip()]
+if origins: app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["POST", "GET"], allow_headers=["content-type"])
+
+
+@app.get("/healthz")
+def healthz(): return {"status": "ok", "mode": "stateless"}
+
+
+@app.post("/api/serverless/quality")
+def quality(course: Course): return quality_report(course)
+
+
+@app.post("/api/serverless/preview", response_class=HTMLResponse)
+def preview(course: Course):
+    try: return render_html(course)
+    except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/serverless/export")
+def export(payload: ExportPayload):
+    try: package, filename = make_zip(payload.course)
+    except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return StreamingResponse(io.BytesIO(package), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{filename}"'})

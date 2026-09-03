@@ -6,6 +6,7 @@ import LmsSettingsEditor from "@/app/lms-settings";
 import QuizEditor from "@/app/quiz-editor";
 import { clearLocalWorkspace, createLocalProject, generateLocalMockCourse, loadLocalWorkspace, saveLocalDraft, updateLocalProjectDirection, updateLocalProjectTitle } from "@/lib/local-workspace";
 import { initialCourseDraft, type CourseDraft } from "@/lib/course";
+import { serverlessExport, serverlessPreview, serverlessQuality } from "@/lib/serverless-api";
 import type { Project, WorkflowDirection } from "@/lib/api";
 
 const steps = [
@@ -25,14 +26,20 @@ function textOf(project: Project) {
 
 function LocalPreview({ project }: { project: Project }) {
   const [slideIndex, setSlideIndex] = useState(0);
+  const [preview, setPreview] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
   const slide = project.course.slides[slideIndex];
   useEffect(() => setSlideIndex(0), [project.id]);
+  async function buildPreview() { setLoading(true); setMessage(""); try { setPreview(await serverlessPreview(project.course)); } catch (reason) { setMessage(reason instanceof Error ? reason.message : "Không thể dựng player."); } finally { setLoading(false); } }
   if (!slide) return <p className="player-empty">Chưa có slide để dựng player.</p>;
-  return <div className="local-preview"><div className="local-preview-head"><span>BẢN XEM TRƯỚC CỤC BỘ</span><strong>{project.title}</strong><small>HTML chỉ được dựng tạm trên màn hình, không lưu làm dữ liệu nguồn.</small></div><article><span>{slideIndex + 1}/{project.course.slides.length}</span><h3>{slide.title}</h3><p>{textOf({ ...project, course: { ...project.course, slides: [slide] } })}</p></article><div className="local-preview-nav"><button type="button" disabled={slideIndex === 0} onClick={() => setSlideIndex((value) => value - 1)}>← Trước</button><button type="button" disabled={slideIndex === project.course.slides.length - 1} onClick={() => setSlideIndex((value) => value + 1)}>Tiếp →</button></div><aside>Media, TTS và video không có trong bản không lưu trữ này. Chúng sẽ mở lại khi trường dùng storage.</aside></div>;
+  return <div className="local-preview"><div className="local-preview-head"><span>BẢN XEM TRƯỚC SERVERLESS</span><strong>{project.title}</strong><small>HTML chỉ được dựng tạm từ course.json, không lưu làm dữ liệu nguồn.</small></div><article><span>{slideIndex + 1}/{project.course.slides.length}</span><h3>{slide.title}</h3><p>{textOf({ ...project, course: { ...project.course, slides: [slide] } })}</p></article><div className="local-preview-nav"><button type="button" disabled={slideIndex === 0} onClick={() => setSlideIndex((value) => value - 1)}>← Trước</button><button type="button" disabled={slideIndex === project.course.slides.length - 1} onClick={() => setSlideIndex((value) => value + 1)}>Tiếp →</button><button type="button" className="primary" disabled={loading} onClick={() => { void buildPreview(); }}>{loading ? "Đang dựng…" : "Dựng player SCORM"}</button></div>{preview && <iframe className="serverless-preview" sandbox="allow-scripts" srcDoc={preview} title={`Player SCORM ${project.title}`} />}{message && <p className="export-message error">{message}</p>}<aside>Media, TTS và video không có trong bản không lưu trữ này. Chúng sẽ mở lại khi trường dùng storage.</aside></div>;
 }
 
 function LocalExport({ project }: { project: Project }) {
   const [backupState, setBackupState] = useState("");
+  const [quality, setQuality] = useState("");
+  const [busy, setBusy] = useState(false);
   const warnings = [
     project.course.slides.some((slide) => slide.status !== "approved") ? "Còn slide chưa được giáo viên duyệt." : "",
     project.course.question_bank.filter((question) => question.selected).length === 0 ? "Chưa chọn câu hỏi nào cho quiz." : "",
@@ -43,7 +50,9 @@ function LocalExport({ project }: { project: Project }) {
     const anchor = document.createElement("a"); anchor.href = url; anchor.download = "course.json"; anchor.click(); URL.revokeObjectURL(url);
     setBackupState("Đã tải course.json để sao lưu. Đây chưa phải ZIP SCORM.");
   }
-  return <div className="export-studio"><section className="export-hero"><div><span>CHẾ ĐỘ KHÔNG LƯU TRỮ</span><h3>Kiểm tra trước khi đóng gói</h3><p>Bản nháp nằm trên trình duyệt. Backend stateless ở Task 14.3 sẽ nhận course.json, kiểm tra và trả ZIP SCORM trực tiếp — không lưu lịch sử export.</p></div><div className="export-actions"><button type="button" onClick={downloadBackup}>Tải bản sao course.json</button><button type="button" className="primary" disabled>Tải ZIP SCORM (đang kết nối)</button></div></section>{warnings.length ? <section className="quality-report"><strong>Cần xem lại trước khi xuất</strong><ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></section> : <section className="quality-report"><strong>Đã sẵn sàng để validator serverless kiểm tra.</strong><p>Vẫn cần upload thử lên K12Online sau khi có ZIP.</p></section>}{backupState && <p className="export-message">{backupState}</p>}</div>;
+  async function checkQuality() { setBusy(true); try { const report = await serverlessQuality(project.course); setQuality(report.summary.warnings ? `${report.summary.warnings} cảnh báo cần giáo viên xem lại.` : "Không có cảnh báo tự động; giáo viên vẫn cần duyệt chuyên môn."); } catch (reason) { setQuality(reason instanceof Error ? reason.message : "Không thể kiểm tra chất lượng."); } finally { setBusy(false); } }
+  async function downloadScorm() { setBusy(true); try { const result = await serverlessExport(project.course); const url = URL.createObjectURL(result.blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = result.filename; anchor.click(); URL.revokeObjectURL(url); setBackupState(`Đã tải ${result.filename}.`); } catch (reason) { setBackupState(reason instanceof Error ? reason.message : "Không thể đóng gói SCORM."); } finally { setBusy(false); } }
+  return <div className="export-studio"><section className="export-hero"><div><span>CHẾ ĐỘ KHÔNG LƯU TRỮ</span><h3>Kiểm tra trước khi đóng gói</h3><p>API stateless nhận course.json, kiểm tra và trả ZIP SCORM trực tiếp — không lưu lịch sử export.</p></div><div className="export-actions"><button type="button" onClick={downloadBackup}>Tải bản sao course.json</button><button type="button" onClick={() => { void checkQuality(); }} disabled={busy}>{busy ? "Đang kiểm tra…" : "Kiểm tra chất lượng"}</button><button type="button" className="primary" disabled={busy} onClick={() => { void downloadScorm(); }}>{busy ? "Đang đóng gói…" : "Tải ZIP SCORM"}</button></div></section>{warnings.length ? <section className="quality-report"><strong>Cần xem lại trước khi xuất</strong><ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></section> : <section className="quality-report"><strong>Đã sẵn sàng để validator serverless kiểm tra.</strong><p>Vẫn cần upload thử lên K12Online sau khi có ZIP.</p></section>}{quality && <p className="export-message">{quality}</p>}{backupState && <p className="export-message">{backupState}</p>}</div>;
 }
 
 export default function LocalAuthoring() {

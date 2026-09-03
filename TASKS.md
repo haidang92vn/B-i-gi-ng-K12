@@ -192,9 +192,9 @@ Acceptance for this first slice:
 - [x] Validate a complete `course.json` on every serverless request.
 - [x] Add local-first browser persistence for the existing 8-step workflow.
 - [ ] Keep AI credentials only in Vercel Environment Variables; never in the browser.
-- [ ] Enforce a 4 MB ZIP guard and disable large source/media/TTS workflows.
-- [ ] Deploy an isolated FastAPI Vercel project and proxy the frontend to it.
-- [ ] Run Mock AI → review → SCORM ZIP end-to-end on the public URL.
+- [x] Enforce a 4 MB ZIP guard and disable large source/media/TTS workflows.
+- [x] Deploy an isolated FastAPI Vercel project and proxy the frontend to it.
+- [x] Run Mock AI → review → SCORM ZIP end-to-end on the public URL.
 
 Acceptance:
 - a teacher can create, review and download a small SCORM ZIP without a VPS,

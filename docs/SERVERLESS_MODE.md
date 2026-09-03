@@ -54,8 +54,8 @@ Nguồn chính thức:
 3. [x] Thêm giao diện local-first cho 8 bước Next.js: một bản nháp và `course.json`
    chỉ sống trong trình duyệt. Giáo viên có thể tải bản sao `course.json`; không có
    lịch sử ZIP ở chế độ này.
-4. Tạo Vercel project FastAPI riêng, đặt khóa AI trong Environment Variables,
-   nối frontend qua `FASTAPI_ORIGIN`, rồi kiểm thử Mock AI và một ZIP nhỏ thật.
+4. [x] Tạo Vercel project FastAPI riêng và nối frontend qua proxy cùng domain.
+   Đã kiểm thử một ZIP Mock nhỏ thật; API không cần khóa AI khi đang dùng Mock.
 
 ## Điều không tuyên bố
 

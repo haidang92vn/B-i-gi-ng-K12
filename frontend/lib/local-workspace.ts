@@ -45,6 +45,7 @@ function emptyCourse(projectId: string, title: string, direction: WorkflowDirect
     objectives: [],
     slides: [],
     question_bank: [],
+    theme: { id: "default", primary_color: "#3157d5", font_family: null, logo_asset_id: null },
     navigation: { mode: "free", show_menu: true, show_progress: true },
     completion: { viewed_percent: 90, passing_score: 70, require_quiz: true },
     scorm: { standard: "SCORM_2004", edition: "4th Edition", preset: "k12online", resume: true, track_score: true, track_completion: true, track_success: true },

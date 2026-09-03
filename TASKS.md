@@ -188,8 +188,8 @@ Acceptance for this first slice:
 
 ## Milestone 14 — Stateless serverless authoring mode [P1]
 
-- [ ] Extract DB-independent FastAPI generation, preview, quality and SCORM export core.
-- [ ] Validate a complete `course.json` on every serverless request.
+- [x] Extract DB-independent FastAPI generation, preview, quality and SCORM export core.
+- [x] Validate a complete `course.json` on every serverless request.
 - [ ] Add local-first browser persistence for the existing 8-step workflow.
 - [ ] Keep AI credentials only in Vercel Environment Variables; never in the browser.
 - [ ] Enforce a 4 MB ZIP guard and disable large source/media/TTS workflows.

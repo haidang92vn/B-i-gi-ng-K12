@@ -21,6 +21,8 @@ from prototype.onboarding import ProvisioningError, provision_school_admin
 from prototype.google_oauth import GoogleProfile, decode_attempt
 from prototype.persistence import database_url
 from prototype.quality import analyze_course
+from prototype.serverless_api import create_serverless_app
+from prototype.serverless_core import ScormRenderer, StatelessModeError, make_mock_course, package_course
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,6 +37,65 @@ def load_prototype():
 
 
 class CourseContractTests(unittest.TestCase):
+    @staticmethod
+    def stateless_renderer():
+        def manifest(title: str):
+            return f'<?xml version="1.0"?><manifest><title>{title}</title><resource href="index.html"/></manifest>'
+
+        def validate_files(files: dict[str, bytes], passing_score: int, completion_percent: int):
+            if set(files) != {"imsmanifest.xml", "index.html", "runtime.js"}:
+                return ["Unexpected stateless file map."]
+            if not 0 <= passing_score <= 100 or not 0 <= completion_percent <= 100:
+                return ["Invalid completion policy."]
+            return []
+
+        def validate_zip(package: bytes):
+            with zipfile.ZipFile(io.BytesIO(package)) as archive:
+                return [] if "imsmanifest.xml" in archive.namelist() else ["Root manifest is missing."]
+
+        return ScormRenderer(
+            to_export_request=lambda course: course,
+            render_html=lambda course: '<html><script src="runtime.js"></script></html>',
+            runtime=lambda: "const API_1484_11 = {};",
+            manifest=manifest,
+            validate_files=validate_files,
+            validate_zip=validate_zip,
+        )
+
+    def test_stateless_core_generates_valid_course_and_never_writes_a_project(self):
+        course = make_mock_course({"title": "Vòng tuần hoàn của nước", "source": "Nước bốc hơi, ngưng tụ thành mây rồi tạo mưa.", "direction": "lesson"})
+        self.assertEqual(course.metadata.title, "Vòng tuần hoàn của nước")
+        self.assertEqual(len(course.slides), 4)
+        self.assertEqual(len(course.question_bank), 8)
+        self.assertTrue(all(question.objective_ids for question in course.question_bank))
+        package, filename = package_course(course, self.stateless_renderer())
+        self.assertTrue(filename.endswith("_SCORM2004.zip"))
+        with zipfile.ZipFile(io.BytesIO(package)) as archive:
+            self.assertEqual(set(archive.namelist()), {"imsmanifest.xml", "index.html", "runtime.js"})
+
+    def test_stateless_core_rejects_assets_and_oversized_zip_before_download(self):
+        course = make_mock_course({"title": "Giới hạn", "source": "Nội dung kiểm tra đầy đủ cho chế độ serverless.", "direction": "lesson"})
+        course.slides[0].blocks.append(Block(id="asset", type="image", asset_id="media-1"))
+        with self.assertRaises(StatelessModeError):
+            package_course(course, self.stateless_renderer())
+        course.slides[0].blocks.pop()
+        with self.assertRaises(StatelessModeError):
+            package_course(course, self.stateless_renderer(), max_bytes=1)
+
+    def test_stateless_fastapi_factory_accepts_canonical_course_without_auth_or_database(self):
+        client = TestClient(create_serverless_app(self.stateless_renderer()))
+        generated = client.post("/api/serverless/generate", json={"title": "Bài tạm", "source": "Nguồn bài học đủ dài để Mock AI tạo nội dung.", "direction": "review"})
+        self.assertEqual(generated.status_code, 200, generated.text)
+        course = generated.json()["course"]
+        quality = client.post("/api/serverless/quality", json=course)
+        self.assertEqual(quality.status_code, 200, quality.text)
+        preview = client.post("/api/serverless/preview", json=course)
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertIn("runtime.js", preview.text)
+        exported = client.post("/api/serverless/export", json={"course": course})
+        self.assertEqual(exported.status_code, 200, exported.text)
+        self.assertEqual(exported.headers["content-type"], "application/zip")
+
     def test_example_matches_json_schema(self):
         schema = json.loads((ROOT / "schemas/course.schema.json").read_text(encoding="utf-8"))
         example = json.loads((ROOT / "examples/course.example.json").read_text(encoding="utf-8"))

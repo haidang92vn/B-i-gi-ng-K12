@@ -185,3 +185,21 @@ Acceptance for this first slice:
 - unauthenticated `/api/v1/me` reaches FastAPI through the frontend proxy and returns `401`;
 - the FastAPI prototype and existing automated suite remain functional;
 - no credential is stored in browser JavaScript or committed configuration.
+
+## Milestone 14 — Stateless serverless authoring mode [P1]
+
+- [ ] Extract DB-independent FastAPI generation, preview, quality and SCORM export core.
+- [ ] Validate a complete `course.json` on every serverless request.
+- [ ] Add local-first browser persistence for the existing 8-step workflow.
+- [ ] Keep AI credentials only in Vercel Environment Variables; never in the browser.
+- [ ] Enforce a 4 MB ZIP guard and disable large source/media/TTS workflows.
+- [ ] Deploy an isolated FastAPI Vercel project and proxy the frontend to it.
+- [ ] Run Mock AI → review → SCORM ZIP end-to-end on the public URL.
+
+Acceptance:
+- a teacher can create, review and download a small SCORM ZIP without a VPS,
+  PostgreSQL, Redis or R2;
+- browser deletion removes the local draft and no project/history data is retained server-side;
+- server rejects invalid `course.json` and oversized responses before download;
+- ChatGPT/Gemini secrets remain server-only;
+- SCORM validator and manual K12Online test disclaimer remain visible.

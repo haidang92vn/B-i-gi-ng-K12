@@ -52,6 +52,24 @@ Sau khi người quản trị đặt biến trên Vercel, cần redeploy project
 và thử tạo một bài bằng từng provider. Không gửi khóa vào chat, không đặt khóa
 ở frontend/Vercel project `frontend`, và không dùng tiền tố `NEXT_PUBLIC_`.
 
+## Điểm chuyển đổi khi triển khai quy mô trường học
+
+Chế độ này phù hợp để giáo viên tự tạo và tải từng bài nhỏ. Khi anh chuyển sang
+triển khai cho trường (đặc biệt mục tiêu khoảng 80 giáo viên), phải chuyển lại
+sang kiến trúc đã duyệt **VPS + PostgreSQL + xác thực nội bộ + Cloudflare R2**
+trước khi mời người dùng thật. Khi đó cần chốt tối thiểu:
+
+- tên miền riêng, HTTPS, backup PostgreSQL/R2 và giám sát/khôi phục;
+- tài khoản trường, phân quyền quản trị/giáo viên/xem/chỉnh sửa và nhật ký;
+- R2 cho media, source và export thay vì đưa tệp lớn qua Vercel;
+- quota theo giáo viên, giới hạn chi tiêu và server-side secrets cho ChatGPT/Gemini;
+- hàng đợi tác vụ, giới hạn tốc độ, cảnh báo lỗi và kiểm thử tải;
+- upload thử SCORM vào tenant K12Online thật, gồm launch, resume, completion,
+  success, score và session time.
+
+Không dùng Vercel stateless như kho lưu trữ dự án hoặc tầng xử lý media/AI tập
+trung cho toàn trường.
+
 ## Giới hạn bắt buộc
 
 Vercel Functions giới hạn cả request và response ở 4,5 MB. Vì ZIP SCORM được

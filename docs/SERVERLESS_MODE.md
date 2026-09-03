@@ -96,6 +96,9 @@ Nguồn chính thức:
    Đã kiểm thử một ZIP Mock nhỏ thật; API không cần khóa AI khi đang dùng Mock.
 5. [ ] Bật ChatGPT/Gemini bằng khóa chỉ có ở Vercel và kiểm thử từng provider
    bằng một bài mẫu. (Đợi người quản trị cấu hình khóa.)
+6. [x] Thêm Playwright E2E chạy local: tạo bài bằng Mock AI, xem cảnh báo,
+   tải ZIP và khôi phục `course.json`. Browser test mock API contract; FastAPI
+   serverless vẫn có test hợp đồng riêng trong Python.
 
 ## Điều không tuyên bố
 

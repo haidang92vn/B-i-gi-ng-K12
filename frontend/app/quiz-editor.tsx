@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getProject, updateCanonicalCourse, type CanonicalCourse, type CourseQuestion, type Project, type QuestionDifficulty, type QuestionType } from "@/lib/api";
+import { type CanonicalCourse, type CourseQuestion, type Project, type QuestionDifficulty, type QuestionType } from "@/lib/api";
+import { getLocalProject as getProject, updateLocalCanonicalCourse as updateCanonicalCourse } from "@/lib/local-workspace";
 import { answerToEditorText, imageOptionsToEditorText, parseEditorAnswer, parseImageOptions, questionWarnings } from "@/lib/quiz";
 
 type SaveTone = "idle" | "loading" | "saved" | "error";

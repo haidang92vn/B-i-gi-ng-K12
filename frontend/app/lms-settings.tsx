@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getProject, updateCanonicalCourse, type NavigationMode, type Project, type ScormPreset } from "@/lib/api";
+import { type NavigationMode, type Project, type ScormPreset } from "@/lib/api";
+import { getLocalProject as getProject, updateLocalCanonicalCourse as updateCanonicalCourse } from "@/lib/local-workspace";
 import { applyLmsSettings, k12OnlinePreset, lmsWarnings, settingsFromCourse, type LmsSettings } from "@/lib/scorm";
 
 type SaveTone = "idle" | "loading" | "saved" | "error";
 
 type Props = {
   project: Project;
+  localOnly?: boolean;
   onProjectChange: (project: Project) => void;
   onSaveState: (tone: SaveTone, message: string, saved: boolean) => void;
 };
@@ -27,7 +29,7 @@ function boundedPercent(value: string, fallback: number) {
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : fallback;
 }
 
-export default function LmsSettingsEditor({ project, onProjectChange, onSaveState }: Props) {
+export default function LmsSettingsEditor({ project, localOnly = false, onProjectChange, onSaveState }: Props) {
   const canEdit = project.access_level !== "viewer";
   const [settings, setSettings] = useState<LmsSettings>(() => settingsFromCourse(project.course));
   const [serverProject, setServerProject] = useState(project);
@@ -181,8 +183,7 @@ export default function LmsSettingsEditor({ project, onProjectChange, onSaveStat
 
       <section className="lms-preview">
         <div><span>PLAYER SAU CẤU HÌNH</span><strong>Xem hiệu lực của menu, tiến độ và điều hướng</strong><small>Player tự tải lại sau khi máy chủ xác nhận revision mới.</small></div>
-        <a href={playerUrl} target="_blank" rel="noopener noreferrer">Mở player ↗</a>
-        <iframe key={serverProject.revision} src={playerUrl} title={`Player cấu hình LMS của ${project.title}`} />
+        {localOnly ? <p>Player SCORM sẽ được dựng tạm bởi API serverless ở bước kết nối tiếp theo; cấu hình vẫn đã được lưu trong course.json trên thiết bị này.</p> : <><a href={playerUrl} target="_blank" rel="noopener noreferrer">Mở player ↗</a><iframe key={serverProject.revision} src={playerUrl} title={`Player cấu hình LMS của ${project.title}`} /></>}
       </section>
 
       <div className="compatibility-note"><strong>Chưa phải xác nhận tương thích K12Online thực tế.</strong><p>Validator tự động chỉ kiểm tra cấu trúc và runtime. Sau khi xuất ở Bước 8 vẫn phải upload vào tenant K12Online thật để kiểm tra launch, resume, completion, success, điểm và session time.</p></div>

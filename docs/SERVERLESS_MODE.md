@@ -47,12 +47,13 @@ Nguồn chính thức:
 
 ## Lộ trình triển khai
 
-1. Tách lõi FastAPI thuần (Pydantic `Course`, Mock/OpenAI/Gemini adapter, quality
-   check, player renderer, SCORM ZIP validator) khỏi DB/R2/session.
-2. Cung cấp bốn API stateless: tạo nháp AI, render player, quality check và export
-   ZIP. Mọi API nhận `course.json` đã validate và không ghi dữ liệu dự án.
-3. Thêm adapter local-first cho 8 bước Next.js: bản nháp, autosave và lịch sử ZIP
-   tạm chỉ sống trong trình duyệt.
+1. [x] Tách lõi FastAPI thuần (Pydantic `Course`, Mock adapter, quality check,
+   player renderer và SCORM ZIP validator) khỏi DB/R2/session.
+2. [x] Cung cấp bốn API stateless: tạo nháp AI, render player, quality check và
+   export ZIP. Mọi API nhận `course.json` đã validate và không ghi dữ liệu dự án.
+3. [x] Thêm giao diện local-first cho 8 bước Next.js: một bản nháp và `course.json`
+   chỉ sống trong trình duyệt. Giáo viên có thể tải bản sao `course.json`; không có
+   lịch sử ZIP ở chế độ này.
 4. Tạo Vercel project FastAPI riêng, đặt khóa AI trong Environment Variables,
    nối frontend qua `FASTAPI_ORIGIN`, rồi kiểm thử Mock AI và một ZIP nhỏ thật.
 

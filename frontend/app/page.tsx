@@ -29,6 +29,7 @@ import {
   type WorkflowDirection,
 } from "@/lib/api";
 import { initialCourseDraft, type CourseDraft } from "@/lib/course";
+import LocalAuthoring from "@/app/local-authoring";
 
 const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 
@@ -102,7 +103,7 @@ function AuthGate({ onAuthenticated, backendMessage }: { onAuthenticated: (teach
   );
 }
 
-export default function Home() {
+function ServerBackedHome() {
   const [teacher, setTeacher] = useState<Teacher | null | undefined>(undefined);
   const [backendMessage, setBackendMessage] = useState("");
   const [activeStep, setActiveStep] = useState(1);
@@ -671,4 +672,8 @@ export default function Home() {
       </main>
     </div>
   );
+}
+
+export default function Home() {
+  return <LocalAuthoring />;
 }

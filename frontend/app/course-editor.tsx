@@ -2,14 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  getProject,
-  regenerateProjectSlide,
-  updateCanonicalCourse,
   type AIProvider,
   type CanonicalCourse,
   type CourseSlide,
   type Project,
 } from "@/lib/api";
+import { getLocalProject as getProject, regenerateLocalSlide as regenerateProjectSlide, updateLocalCanonicalCourse as updateCanonicalCourse } from "@/lib/local-workspace";
 
 type SaveTone = "idle" | "loading" | "saved" | "error";
 

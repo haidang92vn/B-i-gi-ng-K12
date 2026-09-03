@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -12,10 +13,22 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "serverless"))
 
-from studio.app import app  # noqa: E402
+from studio.app import app, player_js, runtime_js  # noqa: E402
 
 
 class ServerlessDeploymentTests(unittest.TestCase):
+    def test_vercel_function_includes_packaged_runtime_files(self):
+        config = json.loads((ROOT / "serverless" / "vercel.json").read_text(encoding="utf-8"))
+        self.assertEqual(config["functions"]["api/index.py"]["includeFiles"], "studio/*.js")
+
+    def test_export_runtime_has_scorm_2004_lifecycle_and_tracking_contract(self):
+        runtime = runtime_js()
+        for token in (
+            "API_1484_11", "Initialize", "GetValue", "SetValue", "Commit", "Terminate",
+            "cmi.suspend_data", "cmi.session_time", "scormResume", "scormFinish",
+        ):
+            self.assertIn(token, runtime)
+
     def test_provider_catalog_exposes_capability_not_credentials(self):
         response = TestClient(app).get("/api/serverless/providers")
         self.assertEqual(response.status_code, 200, response.text)
@@ -61,7 +74,15 @@ class ServerlessDeploymentTests(unittest.TestCase):
         exported = client.post("/api/serverless/export", json={"course": course})
         self.assertEqual(exported.status_code, 200, exported.text)
         with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
-            self.assertEqual(set(archive.namelist()), {"imsmanifest.xml", "index.html", "runtime.js"})
+            self.assertEqual(set(archive.namelist()), {"imsmanifest.xml", "index.html", "runtime.js", "player.js"})
+            self.assertEqual(archive.read("runtime.js").decode(), runtime_js())
+            self.assertEqual(archive.read("player.js").decode(), player_js())
+            index = archive.read("index.html").decode()
+            player = archive.read("player.js").decode()
+        for token in ("window.SCORM_CFG", "player.js", "course-data"):
+            self.assertIn(token, index)
+        for token in ("cmi.progress_measure", "cmi.completion_status", "cmi.score.scaled", "cmi.success_status", "submitQuiz", "restoreState"):
+            self.assertIn(token, player)
 
     def test_export_rejects_media_assets_before_packaging(self):
         course = {"id": "local-2", "revision": 1, "metadata": {"title": "Có media", "direction": "lesson"}, "objectives": [], "slides": [{"id": "s1", "title": "Slide", "layout": "content", "status": "approved", "blocks": [{"id": "image", "type": "image", "asset_id": "a1", "settings": {}}]}], "question_bank": [], "theme": {"id": "default"}, "navigation": {"mode": "free", "show_menu": True, "show_progress": True}, "completion": {"viewed_percent": 90, "passing_score": 70, "require_quiz": False}, "scorm": {"standard": "SCORM_2004", "preset": "k12online", "resume": True, "track_score": True, "track_completion": True, "track_success": True}}

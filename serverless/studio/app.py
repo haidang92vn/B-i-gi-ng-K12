@@ -7,6 +7,7 @@ import json
 import os
 import re
 import zipfile
+from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 from xml.etree import ElementTree
@@ -178,23 +179,41 @@ def provider_course(payload: GenerationPayload) -> tuple[Course, str]:
 
 
 def runtime_js() -> str:
-    return '''let API_1484_11=null;function findAPI(w){for(let i=0;i<10&&w;i++){if(w.API_1484_11)return w.API_1484_11;w=w.parent}return null}function Initialize(){API_1484_11=findAPI(window);try{return API_1484_11?API_1484_11.Initialize(""):"false"}catch(e){return"false"}}function SetValue(k,v){try{return API_1484_11?API_1484_11.SetValue(k,v):"false"}catch(e){return"false"}}function Commit(){try{return API_1484_11?API_1484_11.Commit(""):"false"}catch(e){return"false"}}function Terminate(){try{return API_1484_11?API_1484_11.Terminate(""):"false"}catch(e){return"false"}}window.addEventListener("load",Initialize);window.addEventListener("beforeunload",Terminate);'''
+    return (Path(__file__).with_name("runtime.js")).read_text(encoding="utf-8")
+
+
+def player_js() -> str:
+    return (Path(__file__).with_name("player.js")).read_text(encoding="utf-8")
 
 
 def manifest(title: str) -> str:
     safe = html.escape(title)
     return f'''<?xml version="1.0" encoding="UTF-8"?>
-<manifest identifier="AI_SCORM_STUDIO" xmlns="http://www.imsglobal.org/xsd/imscp_v1p1" xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_v1p3" xmlns:imsss="http://www.imsglobal.org/xsd/imsss"><metadata><schema>ADL SCORM</schema><schemaversion>2004 4th Edition</schemaversion></metadata><organizations default="ORG-1"><organization identifier="ORG-1"><title>{safe}</title><item identifier="ITEM-1" identifierref="RES-1"><title>{safe}</title></item></organization></organizations><resources><resource identifier="RES-1" type="webcontent" adlcp:scormType="sco" href="index.html"><file href="index.html"/><file href="runtime.js"/></resource></resources></manifest>'''
+<manifest identifier="AI_SCORM_STUDIO" xmlns="http://www.imsglobal.org/xsd/imscp_v1p1" xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_v1p3" xmlns:imsss="http://www.imsglobal.org/xsd/imsss"><metadata><schema>ADL SCORM</schema><schemaversion>2004 4th Edition</schemaversion></metadata><organizations default="ORG-1"><organization identifier="ORG-1"><title>{safe}</title><item identifier="ITEM-1" identifierref="RES-1"><title>{safe}</title></item></organization></organizations><resources><resource identifier="RES-1" type="webcontent" adlcp:scormType="sco" href="index.html"><file href="index.html"/><file href="runtime.js"/><file href="player.js"/></resource></resources></manifest>'''
 
 
 def render_html(course: Course) -> str:
     title = html.escape(course.metadata.title)
     payload = _safe_json(course.model_dump(mode="json"))
-    return f'''<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title><style>body{{margin:0;font:18px system-ui;background:#f4f7fb;color:#10233f}}main{{max-width:920px;margin:0 auto;padding:32px}}article{{background:#fff;border-radius:16px;padding:32px;box-shadow:0 8px 30px #10233f18}}.eyebrow{{color:#3157d5;font-weight:700;font-size:13px}}button{{padding:10px 16px;margin:16px 8px 0 0}}#progress{{font-size:14px;color:#52647a}}</style></head><body><main><p class="eyebrow">AI SCORM STUDIO • SCORM 2004</p><article id="player"></article><button id="back">← Trước</button><button id="next">Tiếp →</button><p id="progress"></p></main><script src="runtime.js"></script><script>const course={payload};let i=0;const selected=course.question_bank.filter(q=>q.selected);function render(){{const slide=course.slides[i];document.querySelector('#player').innerHTML=`<h1>${{slide.title}}</h1>${{slide.blocks.filter(b=>['heading','text','callout'].includes(b.type)).map(b=>`<p>${{String(b.text||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')}}</p>`).join('')}}${{i===course.slides.length-1&&selected.length?`<h2>Tự kiểm tra</h2><p>${{selected[0].question}}</p>`:''}}`;document.querySelector('#progress').textContent=`Slide ${{i+1}}/${{course.slides.length}}`;document.querySelector('#back').disabled=i===0;document.querySelector('#next').disabled=i===course.slides.length-1;SetValue('cmi.location',String(i));if(i===course.slides.length-1){{SetValue('cmi.progress_measure','1');SetValue('cmi.completion_status','completed');Commit()}}}}document.querySelector('#back').onclick=()=>{{i--;render()}};document.querySelector('#next').onclick=()=>{{i++;render()}};render();</script></body></html>'''
+    config = _safe_json({
+        "resume": course.scorm.resume,
+        "trackScore": course.scorm.track_score,
+        "trackCompletion": course.scorm.track_completion,
+        "trackSuccess": course.scorm.track_success,
+    })
+    return f'''<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
+<style>
+body{{margin:0;font:18px system-ui;background:#f4f7fb;color:#10233f}}main{{max-width:920px;margin:0 auto;padding:32px}}article{{background:#fff;border-radius:16px;padding:32px;box-shadow:0 8px 30px #10233f18}}.eyebrow{{color:#3157d5;font-weight:700;font-size:13px}}button{{padding:10px 16px;margin:16px 8px 0 0}}#progress{{font-size:14px;color:#52647a}}.question{{margin-top:18px;padding:16px;border:1px solid #dfe6f0;border-radius:12px}}.option{{display:block;margin:8px 0}}.answer{{width:100%;padding:9px;box-sizing:border-box}}
+</style></head><body><main><p class="eyebrow">AI SCORM STUDIO • SCORM 2004</p><article id="player"></article><button id="back">← Trước</button><button id="next">Tiếp →</button><p id="progress"></p></main>
+<script>window.SCORM_CFG={config};</script>
+<script id="course-data" type="application/json">{payload}</script>
+<script src="runtime.js"></script><script src="player.js"></script>
+</body></html>'''
 
 
 def validate(files: dict[str, bytes], course: Course) -> list[str]:
-    required = {"imsmanifest.xml", "index.html", "runtime.js"}
+    required = {"imsmanifest.xml", "index.html", "runtime.js", "player.js"}
     errors = [f"Thiếu tệp {name}." for name in sorted(required - set(files))]
     for name in files:
         if not name or "\\" in name or name.startswith("/") or ".." in name.split("/"): errors.append(f"Đường dẫn không an toàn: {name}.")
@@ -206,16 +225,23 @@ def validate(files: dict[str, bytes], course: Course) -> list[str]:
         hrefs = {node.attrib.get("href") for node in root.iter() if node.attrib.get("href")}
         if version != "2004 4th Edition": errors.append("Manifest phải là SCORM 2004 4th Edition.")
         if len(sco) != 1: errors.append("Manifest cần đúng một SCO resource.")
-        if not {"index.html", "runtime.js"}.issubset(hrefs): errors.append("Manifest phải tham chiếu index.html và runtime.js.")
+        if not {"index.html", "runtime.js", "player.js"}.issubset(hrefs): errors.append("Manifest phải tham chiếu index.html, runtime.js và player.js.")
     except ElementTree.ParseError: errors.append("imsmanifest.xml không hợp lệ.")
-    if b"API_1484_11" not in files["runtime.js"] or b"Initialize" not in files["runtime.js"]: errors.append("Thiếu SCORM 2004 runtime.")
+    runtime = files["runtime.js"]
+    required_runtime_tokens = (b"API_1484_11", b"Initialize", b"GetValue", b"SetValue", b"Commit", b"Terminate", b"cmi.session_time")
+    if any(token not in runtime for token in required_runtime_tokens): errors.append("Thiếu SCORM 2004 runtime đầy đủ.")
     if not 0 <= course.completion.passing_score <= 100: errors.append("Điểm đạt không hợp lệ.")
     return errors
 
 
 def make_zip(course: Course) -> tuple[bytes, str]:
     _assert_serverless_course(course)
-    files = {"imsmanifest.xml": manifest(course.metadata.title).encode(), "index.html": render_html(course).encode(), "runtime.js": runtime_js().encode()}
+    files = {
+        "imsmanifest.xml": manifest(course.metadata.title).encode(),
+        "index.html": render_html(course).encode(),
+        "runtime.js": runtime_js().encode(),
+        "player.js": player_js().encode(),
+    }
     errors = validate(files, course)
     if errors: raise ValueError("; ".join(errors))
     buffer = io.BytesIO()

@@ -99,9 +99,13 @@ Nguồn chính thức:
 6. [x] Thêm Playwright E2E chạy local: tạo bài bằng Mock AI, xem cảnh báo,
    tải ZIP và khôi phục `course.json`. Browser test mock API contract; FastAPI
    serverless vẫn có test hợp đồng riêng trong Python.
+7. [x] Chạy runtime đúng tệp được đóng vào ZIP với LMS SCORM 2004 mô phỏng trong
+   Chromium: `Initialize`, `GetValue`, `SetValue`, `Commit`, `suspend_data`,
+   `session_time` và `Terminate`. Player serverless chấm được chọn một, đúng/sai,
+   chọn nhiều và điền đáp án; các dạng tương tác khác vẫn cần test ở LMS đích.
 
 ## Điều không tuyên bố
 
-Validator serverless chỉ xác nhận cấu trúc SCORM 2004 và các quy tắc kỹ thuật
-của project. Mỗi trường vẫn phải upload thử ZIP lên tenant K12Online trước khi
-giao học sinh.
+Validator serverless và LMS mô phỏng chỉ xác nhận cấu trúc, vòng đời API và các
+quy tắc kỹ thuật của project. Mỗi trường vẫn phải upload thử ZIP lên tenant
+K12Online trước khi giao học sinh.

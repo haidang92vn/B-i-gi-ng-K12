@@ -193,6 +193,7 @@ Acceptance for this first slice:
 - [x] Add local-first browser persistence for the existing 8-step workflow.
 - [x] Export/import a validated `course.json` backup without server-side storage.
 - [x] Add browser regression tests for Mock authoring, quality, ZIP download and backup restore.
+- [x] Run the packaged SCORM 2004 runtime against a simulated LMS API; verify lifecycle, resume data and session time without claiming tenant compatibility.
 - [ ] Keep AI credentials only in Vercel Environment Variables; never in the browser.
 - [x] Enforce a 4 MB ZIP guard and disable large source/media/TTS workflows.
 - [x] Deploy an isolated FastAPI Vercel project and proxy the frontend to it.

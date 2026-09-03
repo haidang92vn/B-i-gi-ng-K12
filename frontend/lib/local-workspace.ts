@@ -147,6 +147,119 @@ export async function saveGeneratedCourse(project: Project, course: CanonicalCou
   return updateLocalCanonicalCourse(project, course);
 }
 
+const directionValues = new Set<WorkflowDirection>(["lesson", "review", "advanced"]);
+const blockTypes = new Set(["heading", "text", "image", "audio", "video", "callout", "quiz", "embed"]);
+const questionTypes = new Set(["single", "multiple", "truefalse", "fill", "matching", "ordering", "dragdrop", "image"]);
+const difficultyValues = new Set(["recognize", "understand", "apply", "advanced"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertBackup(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(`course.json không hợp lệ: ${message}`);
+}
+
+function stringValue(value: unknown, message: string) {
+  assertBackup(typeof value === "string" && value.trim().length > 0, message);
+  return value;
+}
+
+function recordValue(value: unknown, message: string) {
+  assertBackup(isRecord(value), message);
+  return value;
+}
+
+function arrayValue(value: unknown, message: string) {
+  assertBackup(Array.isArray(value), message);
+  return value;
+}
+
+/**
+ * Browser-side guard for an untrusted backup file. The server validates again
+ * before preview/quality/export; this guard prevents a malformed file from
+ * reaching the local editors.
+ */
+export function parseLocalCourseBackup(value: unknown): CanonicalCourse {
+  const course = recordValue(value, "gốc phải là một object.");
+  assertBackup(course.schema_version === "1.0.0", "chỉ hỗ trợ schema_version 1.0.0.");
+  stringValue(course.id, "thiếu id.");
+  assertBackup(Number.isInteger(course.revision) && Number(course.revision) >= 1, "revision phải là số nguyên dương.");
+
+  const metadata = recordValue(course.metadata, "thiếu metadata.");
+  stringValue(metadata.title, "metadata.title bị thiếu.");
+  assertBackup(directionValues.has(metadata.direction as WorkflowDirection), "metadata.direction không được hỗ trợ.");
+  stringValue(metadata.language, "metadata.language bị thiếu.");
+
+  const objectives = arrayValue(course.objectives, "objectives phải là mảng.");
+  objectives.forEach((objective, index) => {
+    const item = recordValue(objective, `objectives[${index}] không hợp lệ.`);
+    stringValue(item.id, `objectives[${index}].id bị thiếu.`);
+    stringValue(item.text, `objectives[${index}].text bị thiếu.`);
+  });
+
+  const slides = arrayValue(course.slides, "slides phải là mảng.");
+  slides.forEach((slide, index) => {
+    const item = recordValue(slide, `slides[${index}] không hợp lệ.`);
+    stringValue(item.id, `slides[${index}].id bị thiếu.`);
+    stringValue(item.title, `slides[${index}].title bị thiếu.`);
+    stringValue(item.layout, `slides[${index}].layout bị thiếu.`);
+    assertBackup(["ai_draft", "edited", "approved"].includes(String(item.status)), `slides[${index}].status không hợp lệ.`);
+    arrayValue(item.blocks, `slides[${index}].blocks phải là mảng.`).forEach((block, blockIndex) => {
+      const blockItem = recordValue(block, `slides[${index}].blocks[${blockIndex}] không hợp lệ.`);
+      stringValue(blockItem.id, `slides[${index}].blocks[${blockIndex}].id bị thiếu.`);
+      assertBackup(blockTypes.has(String(blockItem.type)), `slides[${index}].blocks[${blockIndex}].type không được hỗ trợ.`);
+      assertBackup(!blockItem.asset_id && !["image", "audio", "video"].includes(String(blockItem.type)), "bản không lưu trữ không thể khôi phục media.");
+      assertBackup(blockItem.settings === undefined || isRecord(blockItem.settings), `slides[${index}].blocks[${blockIndex}].settings không hợp lệ.`);
+    });
+  });
+
+  const questions = arrayValue(course.question_bank, "question_bank phải là mảng.");
+  questions.forEach((question, index) => {
+    const item = recordValue(question, `question_bank[${index}] không hợp lệ.`);
+    stringValue(item.id, `question_bank[${index}].id bị thiếu.`);
+    assertBackup(questionTypes.has(String(item.type)), `question_bank[${index}].type không được hỗ trợ.`);
+    stringValue(item.question, `question_bank[${index}].question bị thiếu.`);
+    assertBackup(typeof item.selected === "boolean", `question_bank[${index}].selected không hợp lệ.`);
+    assertBackup(typeof item.score === "number" && Number.isFinite(item.score) && item.score >= 0, `question_bank[${index}].score không hợp lệ.`);
+    assertBackup(difficultyValues.has(String(item.difficulty)), `question_bank[${index}].difficulty không hợp lệ.`);
+    assertBackup(Object.hasOwn(item, "correct_answer"), `question_bank[${index}].correct_answer bị thiếu.`);
+    assertBackup(item.options === undefined || (Array.isArray(item.options) && item.options.every((option) => typeof option === "string")), `question_bank[${index}].options không hợp lệ.`);
+    assertBackup(item.objective_ids === undefined || (Array.isArray(item.objective_ids) && item.objective_ids.every((objectiveId) => typeof objectiveId === "string")), `question_bank[${index}].objective_ids không hợp lệ.`);
+    assertBackup(item.settings === undefined || isRecord(item.settings), `question_bank[${index}].settings không hợp lệ.`);
+  });
+
+  const theme = recordValue(course.theme, "thiếu theme.");
+  stringValue(theme.id, "theme.id bị thiếu.");
+  const navigation = recordValue(course.navigation, "thiếu navigation.");
+  assertBackup(["free", "sequential", "restricted"].includes(String(navigation.mode)), "navigation.mode không hợp lệ.");
+  assertBackup(typeof navigation.show_menu === "boolean" && typeof navigation.show_progress === "boolean", "navigation không hợp lệ.");
+  const completion = recordValue(course.completion, "thiếu completion.");
+  assertBackup(Number.isInteger(completion.viewed_percent) && Number(completion.viewed_percent) >= 0 && Number(completion.viewed_percent) <= 100, "completion.viewed_percent không hợp lệ.");
+  assertBackup(Number.isInteger(completion.passing_score) && Number(completion.passing_score) >= 0 && Number(completion.passing_score) <= 100, "completion.passing_score không hợp lệ.");
+  assertBackup(typeof completion.require_quiz === "boolean", "completion.require_quiz không hợp lệ.");
+  const scorm = recordValue(course.scorm, "thiếu scorm.");
+  assertBackup(scorm.standard === "SCORM_2004" && ["k12online", "custom"].includes(String(scorm.preset)), "scorm không hợp lệ.");
+  assertBackup(["resume", "track_score", "track_completion", "track_success"].every((key) => typeof scorm[key] === "boolean"), "cấu hình SCORM không hợp lệ.");
+
+  const normalized = clone(course) as CanonicalCourse;
+  normalized.question_bank = normalized.question_bank.map((question) => ({ ...question, options: question.options || [], objective_ids: question.objective_ids || [], settings: question.settings || {} }));
+  normalized.slides = normalized.slides.map((slide) => ({ ...slide, blocks: slide.blocks.map((block) => ({ ...block, settings: block.settings || {} })) }));
+  return normalized;
+}
+
+export function sourceTextFromCourse(course: CanonicalCourse) {
+  const restored = course.slides.flatMap((slide) => slide.blocks).filter((block) => ["heading", "text", "callout"].includes(block.type)).map((block) => block.text?.trim()).filter((text): text is string => Boolean(text)).join("\n\n").slice(0, 24_000);
+  return restored || "Đã khôi phục từ course.json. Bản sao không chứa nội dung nguồn ban đầu.";
+}
+
+export async function restoreLocalCourseBackup(value: unknown): Promise<LocalWorkspace & { project: Project }> {
+  const course = parseLocalCourseBackup(value);
+  const project: Project = { id: course.id, title: course.metadata.title, status: "local", revision: course.revision, access_level: "owner", course };
+  const workspace = write({ draft: { title: project.title, sourceText: sourceTextFromCourse(course), direction: course.metadata.direction }, project });
+  return { ...workspace, project: workspace.project! };
+}
+
 export async function regenerateLocalSlide(project: Project, slideId: string, input: { source: string; provider?: string; credentialId?: string }): Promise<Project> {
   const parts = sentences(input.source);
   const course = clone(project.course);

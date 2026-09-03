@@ -191,6 +191,7 @@ Acceptance for this first slice:
 - [x] Extract DB-independent FastAPI generation, preview, quality and SCORM export core.
 - [x] Validate a complete `course.json` on every serverless request.
 - [x] Add local-first browser persistence for the existing 8-step workflow.
+- [x] Export/import a validated `course.json` backup without server-side storage.
 - [ ] Keep AI credentials only in Vercel Environment Variables; never in the browser.
 - [x] Enforce a 4 MB ZIP guard and disable large source/media/TTS workflows.
 - [x] Deploy an isolated FastAPI Vercel project and proxy the frontend to it.

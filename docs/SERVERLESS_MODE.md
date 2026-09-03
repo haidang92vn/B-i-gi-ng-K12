@@ -12,6 +12,13 @@ nháp cục bộ theo phiên để giáo viên đi qua đủ 8 bước; FastAPI 
 đã kiểm tra để tạo nháp AI, xem trước, kiểm tra chất lượng và trả ZIP SCORM.
 Không lưu HTML sinh ra làm dữ liệu nguồn.
 
+Giáo viên có thể tải `course.json` ở Bước 8 và dùng **Nhập course.json** để
+tiếp tục trên cùng hoặc một thiết bị khác. Tệp nhập tối đa 1 MB, được kiểm tra
+trong trình duyệt trước khi thay thế bản nháp cục bộ và vẫn được FastAPI kiểm
+tra lại trước khi xem trước/đóng gói. Bản sao chỉ mang `course.json`; nội dung
+nguồn ban đầu được tái tạo từ slide và media không thể được khôi phục ở chế độ
+không có storage.
+
 ## Kiến trúc
 
 ```text

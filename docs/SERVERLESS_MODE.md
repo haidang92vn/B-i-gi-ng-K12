@@ -32,6 +32,19 @@ Vercel Functions
 - File nguồn chỉ hỗ trợ văn bản ngắn. Media/TTS, video, tải file lớn, nguồn PDF/
   DOCX/PPTX và lịch sử export giữ ngoài serverless mode cho đến khi có storage.
 
+## AI trong serverless mode
+
+Mock AI luôn sẵn sàng để thử toàn bộ 8 bước mà không gửi nội dung ra bên ngoài.
+Giao diện cũng hiển thị ChatGPT và Gemini, nhưng tự khóa chúng cho đến khi biến
+`OPENAI_API_KEY` hoặc `GEMINI_API_KEY` tương ứng được tạo trong **Vercel project
+`serverless`**. Endpoint trạng thái chỉ trả về `available` và tên model, không
+bao giờ trả khóa. Mẫu tên biến và model mặc định có ở
+[`serverless/.env.example`](../serverless/.env.example).
+
+Sau khi người quản trị đặt biến trên Vercel, cần redeploy project `serverless`
+và thử tạo một bài bằng từng provider. Không gửi khóa vào chat, không đặt khóa
+ở frontend/Vercel project `frontend`, và không dùng tiền tố `NEXT_PUBLIC_`.
+
 ## Giới hạn bắt buộc
 
 Vercel Functions giới hạn cả request và response ở 4,5 MB. Vì ZIP SCORM được
@@ -56,6 +69,8 @@ Nguồn chính thức:
    lịch sử ZIP ở chế độ này.
 4. [x] Tạo Vercel project FastAPI riêng và nối frontend qua proxy cùng domain.
    Đã kiểm thử một ZIP Mock nhỏ thật; API không cần khóa AI khi đang dùng Mock.
+5. [ ] Bật ChatGPT/Gemini bằng khóa chỉ có ở Vercel và kiểm thử từng provider
+   bằng một bài mẫu. (Đợi người quản trị cấu hình khóa.)
 
 ## Điều không tuyên bố
 

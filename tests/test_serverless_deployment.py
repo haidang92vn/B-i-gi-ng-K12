@@ -16,6 +16,32 @@ from studio.app import app  # noqa: E402
 
 
 class ServerlessDeploymentTests(unittest.TestCase):
+    def test_provider_catalog_exposes_capability_not_credentials(self):
+        response = TestClient(app).get("/api/serverless/providers")
+        self.assertEqual(response.status_code, 200, response.text)
+        providers = response.json()
+        self.assertEqual(providers["mock"]["available"], True)
+        self.assertEqual(providers["mock"]["model"], "mock")
+        for name in ("openai", "gemini"):
+            self.assertIn("available", providers[name])
+            self.assertIn("model", providers[name])
+            self.assertNotIn("api_key", providers[name])
+            self.assertNotIn("key", providers[name])
+
+    def test_mock_generation_returns_a_canonical_course_without_provider_key(self):
+        response = TestClient(app).post("/api/serverless/generate", json={
+            "title": "Vòng tuần hoàn nước",
+            "source": "Nước bốc hơi, ngưng tụ thành mây rồi tạo mưa. Quá trình này lặp lại trong tự nhiên.",
+            "direction": "lesson",
+            "provider": "mock",
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        generated = response.json()
+        self.assertEqual(generated["provider"], "mock")
+        self.assertEqual(generated["model"], "mock")
+        self.assertEqual(len(generated["course"]["slides"]), 4)
+        self.assertEqual(len(generated["course"]["question_bank"]), 8)
+
     def test_health_quality_preview_and_export_never_need_persistence(self):
         course = {
             "id": "local-1", "revision": 3,

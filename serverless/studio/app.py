@@ -9,6 +9,7 @@ import re
 import zipfile
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 from uuid import uuid4
 from xml.etree import ElementTree
 
@@ -129,6 +130,59 @@ def _safe_json(value: object) -> str:
 def _assert_serverless_course(course: Course) -> None:
     if any(block.asset_id or block.type in {"image", "audio", "video"} for slide in course.slides for block in slide.blocks):
         raise ValueError("Chế độ serverless không đóng gói ảnh, audio hoặc video. Hãy bỏ media trước khi xuất.")
+    interaction_errors = [error for question in course.question_bank if question.selected for error in [_interaction_error(question)] if error]
+    if interaction_errors:
+        raise ValueError("; ".join(interaction_errors))
+
+
+def _image_options(question: Question) -> list[dict[str, Any]]:
+    options = question.settings.get("image_options", [])
+    return [item for item in options if isinstance(item, dict)] if isinstance(options, list) else []
+
+
+def _is_safe_https_url(value: object) -> bool:
+    if not isinstance(value, str) or len(value) > 2_000:
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme == "https" and bool(parsed.netloc) and not parsed.username and not parsed.password
+
+
+def _interaction_error(question: Question) -> str | None:
+    prefix = f"Câu hỏi “{question.question[:80]}”"
+    if not question.question.strip():
+        return f"{prefix} thiếu nội dung."
+    if question.score <= 0:
+        return f"{prefix} phải có điểm lớn hơn 0."
+    if question.correct_answer in (None, "", [], {}):
+        return f"{prefix} thiếu đáp án đúng."
+    if question.type in {"single", "multiple", "truefalse", "ordering", "dragdrop"} and len(question.options) < 2:
+        return f"{prefix} cần ít nhất hai phương án."
+    if question.type in {"multiple", "ordering", "dragdrop"}:
+        if not isinstance(question.correct_answer, list) or not question.correct_answer:
+            return f"{prefix} cần đáp án dạng danh sách theo thứ tự."
+        if not all(isinstance(item, str) and item.strip() for item in question.correct_answer):
+            return f"{prefix} có đáp án danh sách không hợp lệ."
+        if any(str(item) not in question.options for item in question.correct_answer):
+            return f"{prefix} có đáp án không nằm trong các phương án."
+    if question.type == "matching":
+        if not isinstance(question.correct_answer, dict) or len(question.correct_answer) < 2:
+            return f"{prefix} cần ít nhất hai cặp ghép."
+        if not all(isinstance(left, str) and left.strip() and isinstance(right, str) and right.strip() for left, right in question.correct_answer.items()):
+            return f"{prefix} có cặp ghép không hợp lệ."
+    if question.type == "image":
+        options = _image_options(question)
+        if len(options) < 2:
+            return f"{prefix} cần ít nhất hai ảnh lựa chọn."
+        ids = [str(item.get("id", "")).strip() for item in options]
+        if not all(ids) or len(ids) != len(set(ids)) or str(question.correct_answer) not in ids:
+            return f"{prefix} có mã ảnh hoặc đáp án ảnh không hợp lệ."
+        if any("asset_id" in item for item in options):
+            return f"{prefix} đang dùng asset ảnh; chế độ serverless chỉ hỗ trợ URL HTTPS, không đóng gói media."
+        if not all(_is_safe_https_url(item.get("src")) for item in options):
+            return f"{prefix} cần URL ảnh HTTPS hợp lệ."
+        if not question.settings.get("external_media_rights_confirmed"):
+            return f"{prefix} cần xác nhận quyền sử dụng ảnh URL bên ngoài trước khi xuất."
+    return None
 
 
 def quality_report(course: Course) -> dict[str, object]:
@@ -141,6 +195,9 @@ def quality_report(course: Course) -> dict[str, object]:
     if not selected: findings.append({"code": "NO_QUIZ", "severity": "warning", "scope": "course", "item_id": None, "title": "Chưa có quiz", "message": "Không có câu hỏi nào được chọn.", "suggestion": "Chọn ít nhất một câu hỏi ở Bước 5."})
     for question in selected:
         if not question.question.strip() or question.correct_answer in (None, "", []): findings.append({"code": "QUESTION_INCOMPLETE", "severity": "warning", "scope": "question", "item_id": question.id, "title": "Câu hỏi chưa hoàn chỉnh", "message": "Thiếu nội dung hoặc đáp án đúng.", "suggestion": "Bổ sung câu hỏi, đáp án và kiểm tra cách chấm."})
+        error = _interaction_error(question)
+        if error:
+            findings.append({"code": "QUESTION_INTERACTION_INVALID", "severity": "warning", "scope": "question", "item_id": question.id, "title": "Cấu hình tương tác chưa xuất được", "message": error, "suggestion": "Sửa dữ liệu câu hỏi trước khi xuất ZIP SCORM."})
     warnings = sum(item["severity"] == "warning" for item in findings)
     return {"course_id": course.id, "revision": course.revision, "score": max(0, 100 - warnings * 10), "summary": {"warnings": warnings, "info": 0, "checked_slides": len(course.slides), "checked_questions": len(course.question_bank)}, "findings": findings, "blocking": False}
 
@@ -204,7 +261,7 @@ def render_html(course: Course) -> str:
     return f'''<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
 <style>
-body{{margin:0;font:18px system-ui;background:#f4f7fb;color:#10233f}}main{{max-width:920px;margin:0 auto;padding:32px}}article{{background:#fff;border-radius:16px;padding:32px;box-shadow:0 8px 30px #10233f18}}.eyebrow{{color:#3157d5;font-weight:700;font-size:13px}}button{{padding:10px 16px;margin:16px 8px 0 0}}#progress{{font-size:14px;color:#52647a}}.question{{margin-top:18px;padding:16px;border:1px solid #dfe6f0;border-radius:12px}}.option{{display:block;margin:8px 0}}.answer{{width:100%;padding:9px;box-sizing:border-box}}
+body{{margin:0;font:18px system-ui;background:#f4f7fb;color:#10233f}}main{{max-width:920px;margin:0 auto;padding:32px}}article{{background:#fff;border-radius:16px;padding:32px;box-shadow:0 8px 30px #10233f18}}.eyebrow{{color:#3157d5;font-weight:700;font-size:13px}}button{{padding:10px 16px;margin:16px 8px 0 0}}#progress{{font-size:14px;color:#52647a}}.question{{margin-top:18px;padding:16px;border:1px solid #dfe6f0;border-radius:12px}}.option{{display:block;margin:8px 0}}.answer{{width:100%;padding:9px;box-sizing:border-box}}.answers{{display:grid;gap:10px;margin-top:14px}}.matching-option{{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,1fr);gap:12px;align-items:center;background:#fff;padding:10px;border-radius:8px}}.matching-option select{{padding:9px}}.sequence-bank,.sequence-answer{{min-height:54px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}}.sequence-answer{{margin:8px 0;padding-left:36px;border:2px dashed #8297ca}}.sequence-token{{margin:0;background:#eef3ff;border:1px solid #9eb0de;border-radius:8px;cursor:grab}}.drag-over{{background:#e7efff}}.interaction-help{{margin:0;color:#52647a;font-size:14px}}.image-option{{display:grid;grid-template-columns:22px minmax(96px,160px) 1fr;gap:10px;align-items:center;background:#fff;padding:10px;border-radius:8px}}.image-option img{{width:160px;height:96px;object-fit:cover;border-radius:8px;border:1px solid #d6dde9}}@media(max-width:600px){{main{{padding:16px}}.matching-option{{grid-template-columns:1fr}}.image-option{{grid-template-columns:22px 1fr}}.image-option img{{grid-column:2;width:100%;height:auto}}}}
 </style></head><body><main><p class="eyebrow">AI SCORM STUDIO • SCORM 2004</p><article id="player"></article><button id="back">← Trước</button><button id="next">Tiếp →</button><p id="progress"></p></main>
 <script>window.SCORM_CFG={config};</script>
 <script id="course-data" type="application/json">{payload}</script>
@@ -281,7 +338,9 @@ def quality(course: Course): return quality_report(course)
 
 @app.post("/api/serverless/preview", response_class=HTMLResponse)
 def preview(course: Course):
-    try: return render_html(course)
+    try:
+        _assert_serverless_course(course)
+        return render_html(course)
     except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

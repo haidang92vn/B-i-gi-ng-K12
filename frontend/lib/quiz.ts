@@ -1,6 +1,6 @@
 import type { CourseQuestion, QuestionType } from "@/lib/api";
 
-export type ImageOption = { id: string; asset_id: string; label: string };
+export type ImageOption = { id: string; asset_id?: string; src?: string; label: string };
 
 export function answerToEditorText(answer: unknown, type: QuestionType): string {
   if (type === "matching" && answer && typeof answer === "object" && !Array.isArray(answer)) {
@@ -23,7 +23,7 @@ export function imageOptionsToEditorText(settings: Record<string, unknown>): str
   const options = Array.isArray(settings.image_options) ? settings.image_options : [];
   return options.map((item) => {
     const option = item as Partial<ImageOption>;
-    return `${option.id ?? ""} | ${option.asset_id ?? ""} | ${option.label ?? ""}`;
+    return `${option.id ?? ""} | ${option.src ?? option.asset_id ?? ""} | ${option.label ?? ""}`;
   }).join("\n");
 }
 
@@ -31,7 +31,7 @@ export function parseImageOptions(value: string): ImageOption[] {
   return value.split("\n")
     .map((line) => line.split("|").map((part) => part.trim()))
     .filter((parts) => parts[0] && parts[1])
-    .map(([id, asset_id, label]) => ({ id, asset_id, label: label || id }));
+    .map(([id, source, label]) => source.startsWith("https://") ? ({ id, src: source, label: label || id }) : ({ id, asset_id: source, label: label || id }));
 }
 
 export function questionWarnings(question: CourseQuestion): string[] {

@@ -1,6 +1,7 @@
 """Contract tests for the self-contained Vercel API project."""
 from __future__ import annotations
 
+import copy
 import io
 import json
 from pathlib import Path
@@ -89,3 +90,39 @@ class ServerlessDeploymentTests(unittest.TestCase):
         response = TestClient(app).post("/api/serverless/export", json={"course": course})
         self.assertEqual(response.status_code, 422)
         self.assertIn("không đóng gói", response.json()["detail"])
+
+    def test_advanced_interactions_export_only_when_their_canonical_configuration_is_safe(self):
+        course = {
+            "id": "advanced-1", "revision": 1,
+            "metadata": {"title": "Tương tác", "direction": "lesson"}, "objectives": [],
+            "slides": [{"id": "s1", "title": "Luyện tập", "layout": "content", "status": "approved", "blocks": [{"id": "b1", "type": "text", "text": "Hoàn thành các câu hỏi tương tác.", "settings": {}}]}],
+            "question_bank": [
+                {"id": "match", "type": "matching", "question": "Ghép cặp hành tinh", "selected": True, "score": 1, "difficulty": "understand", "correct_answer": {"Trái Đất": "Hành tinh", "Mặt Trời": "Sao"}, "options": ["Sao", "Hành tinh"], "objective_ids": [], "settings": {}},
+                {"id": "order", "type": "ordering", "question": "Sắp xếp chu trình", "selected": True, "score": 1, "difficulty": "understand", "correct_answer": ["Bốc hơi", "Ngưng tụ"], "options": ["Ngưng tụ", "Bốc hơi"], "objective_ids": [], "settings": {}},
+                {"id": "drag", "type": "dragdrop", "question": "Kéo thả chu trình", "selected": True, "score": 1, "difficulty": "understand", "correct_answer": ["Hơi nước", "Mây"], "options": ["Mây", "Hơi nước"], "objective_ids": [], "settings": {}},
+                {"id": "image", "type": "image", "question": "Chọn nước", "selected": True, "score": 1, "difficulty": "understand", "correct_answer": "water", "options": ["water", "rock"], "objective_ids": [], "settings": {"external_media_rights_confirmed": True, "image_options": [{"id": "water", "src": "https://example.com/water.png", "label": "Nước"}, {"id": "rock", "src": "https://example.com/rock.png", "label": "Đá"}]}},
+            ],
+            "theme": {"id": "default"}, "navigation": {"mode": "free", "show_menu": True, "show_progress": True},
+            "completion": {"viewed_percent": 90, "passing_score": 70, "require_quiz": True},
+            "scorm": {"standard": "SCORM_2004", "preset": "k12online", "resume": True, "track_score": True, "track_completion": True, "track_success": True},
+        }
+        client = TestClient(app)
+        self.assertEqual(client.post("/api/serverless/preview", json=course).status_code, 200)
+        exported = client.post("/api/serverless/export", json={"course": course})
+        self.assertEqual(exported.status_code, 200, exported.text)
+        with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+            player = archive.read("player.js").decode()
+        for token in ("matchingMarkup", "sequenceMarkup", "imageMarkup", "safeImageUrl", "samePairs"):
+            self.assertIn(token, player)
+
+        no_rights = copy.deepcopy(course)
+        no_rights["question_bank"][3]["settings"]["external_media_rights_confirmed"] = False
+        rejected = client.post("/api/serverless/export", json={"course": no_rights})
+        self.assertEqual(rejected.status_code, 422)
+        self.assertIn("quyền sử dụng", rejected.json()["detail"])
+
+        asset_backed = copy.deepcopy(course)
+        asset_backed["question_bank"][3]["settings"]["image_options"][0] = {"id": "water", "asset_id": "asset-water", "label": "Nước"}
+        rejected_asset = client.post("/api/serverless/export", json={"course": asset_backed})
+        self.assertEqual(rejected_asset.status_code, 422)
+        self.assertIn("asset ảnh", rejected_asset.json()["detail"])

@@ -5,6 +5,7 @@ const selected = course.question_bank.filter((question) => question.selected);
 let i = 0;
 let highestVisited = 0;
 let quizSubmitted = false;
+let draggingToken = null;
 const player = document.querySelector("#player");
 const back = document.querySelector("#back");
 const next = document.querySelector("#next");
@@ -14,34 +15,96 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-function answerMarkup(question) {
-  const options = Array.isArray(question.options) ? question.options : [];
-  if (["single", "truefalse"].includes(question.type)) {
-    return options.map((option) => `<label class="option"><input type="radio" name="q-${escapeHtml(question.id)}" value="${escapeHtml(option)}"> ${escapeHtml(option)}</label>`).join("");
-  }
-  if (question.type === "multiple") {
-    return options.map((option) => `<label class="option"><input type="checkbox" name="q-${escapeHtml(question.id)}" value="${escapeHtml(option)}"> ${escapeHtml(option)}</label>`).join("");
-  }
-  if (question.type === "fill") return `<input class="answer" data-answer="${escapeHtml(question.id)}" placeholder="Nhập câu trả lời">`;
-  return `<p>Câu hỏi dạng ${escapeHtml(question.type)} cần được kiểm tra trong LMS đích; bản serverless hiện chỉ chấm các dạng chọn một, đúng/sai, chọn nhiều và điền đáp án.</p>`;
-}
-
-function quizMarkup() {
-  return selected.map((question) => `<section class="question" data-question="${escapeHtml(question.id)}"><strong>${escapeHtml(question.question)}</strong>${answerMarkup(question)}</section>`).join("");
-}
-
 function normalise(value) {
   return String(value ?? "").trim().toLocaleLowerCase("vi-VN");
 }
 
+function questionElement(question) {
+  return [...document.querySelectorAll("[data-question]")].find((element) => element.dataset.question === question.id);
+}
+
+function stableShuffle(question, options) {
+  let seed = [...String(question.id)].reduce((total, character) => ((total * 31) + character.charCodeAt(0)) >>> 0, 0);
+  return [...options].map((value, index) => ({ value, index, sort: (seed = (seed * 1664525 + 1013904223) >>> 0) }))
+    .sort((left, right) => left.sort - right.sort || left.index - right.index).map((item) => item.value);
+}
+
+function safeImageUrl(value) {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === "https:" && url.hostname ? url.href : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function imageOptions(question) {
+  const configured = Array.isArray(question.settings?.image_options) ? question.settings.image_options : [];
+  return configured.filter((item) => item && typeof item === "object" && String(item.id || "") && safeImageUrl(item.src));
+}
+
+function matchingMarkup(question) {
+  const pairs = question.correct_answer && typeof question.correct_answer === "object" && !Array.isArray(question.correct_answer) ? question.correct_answer : {};
+  const values = [...new Set([...Object.values(pairs), ...(Array.isArray(question.options) ? question.options : [])].map(String))];
+  return Object.keys(pairs).map((left) => `<label class="matching-option"><span>${escapeHtml(left)}</span><select data-match-left="${escapeHtml(left)}"><option value="">Chọn đáp án</option>${values.map((right) => `<option value="${escapeHtml(right)}">${escapeHtml(right)}</option>`).join("")}</select></label>`).join("");
+}
+
+function sequenceMarkup(question) {
+  const options = stableShuffle(question, Array.isArray(question.options) ? question.options : []);
+  const tokens = options.map((option) => `<button type="button" class="sequence-token" draggable="true" data-value="${escapeHtml(option)}">${escapeHtml(option)}</button>`).join("");
+  const label = question.type === "ordering" ? "Sắp xếp các thẻ theo thứ tự đúng." : "Kéo hoặc bấm chọn thẻ theo thứ tự đúng.";
+  return `<p class="interaction-help">${label}</p><div class="sequence-bank" data-sequence-bank>${tokens}</div><ol class="sequence-answer" data-sequence-answer aria-label="Đáp án đã chọn"></ol>`;
+}
+
+function imageMarkup(question) {
+  return imageOptions(question).map((option) => {
+    const src = safeImageUrl(option.src);
+    const label = String(option.label || option.id);
+    return `<label class="image-option"><input type="radio" name="q-${escapeHtml(question.id)}" value="${escapeHtml(option.id)}"><img loading="lazy" src="${escapeHtml(src)}" alt="${escapeHtml(label)}"><span>${escapeHtml(label)}</span></label>`;
+  }).join("");
+}
+
+function answerMarkup(question) {
+  const options = Array.isArray(question.options) ? question.options : [];
+  if (["single", "truefalse"].includes(question.type)) return options.map((option) => `<label class="option"><input type="radio" name="q-${escapeHtml(question.id)}" value="${escapeHtml(option)}"> ${escapeHtml(option)}</label>`).join("");
+  if (question.type === "multiple") return options.map((option) => `<label class="option"><input type="checkbox" name="q-${escapeHtml(question.id)}" value="${escapeHtml(option)}"> ${escapeHtml(option)}</label>`).join("");
+  if (question.type === "fill") return `<input class="answer" data-answer="${escapeHtml(question.id)}" placeholder="Nhập câu trả lời">`;
+  if (question.type === "matching") return matchingMarkup(question);
+  if (["ordering", "dragdrop"].includes(question.type)) return sequenceMarkup(question);
+  if (question.type === "image") return imageMarkup(question);
+  return "<p>Không nhận diện được dạng câu hỏi.</p>";
+}
+
+function quizMarkup() {
+  return selected.map((question) => `<section class="question" data-question="${escapeHtml(question.id)}" data-type="${escapeHtml(question.type)}"><strong>${escapeHtml(question.question)}</strong><div class="answers">${answerMarkup(question)}</div></section>`).join("");
+}
+
 function selectedAnswer(question) {
-  if (question.type === "fill") return [...document.querySelectorAll("[data-answer]")].find((input) => input.dataset.answer === question.id)?.value || "";
-  return [...document.getElementsByName(`q-${question.id}`)].filter((input) => input.checked).map((input) => input.value);
+  const root = questionElement(question);
+  if (!root) return "";
+  if (question.type === "fill") return root.querySelector("[data-answer]")?.value || "";
+  if (question.type === "matching") return Object.fromEntries([...root.querySelectorAll("[data-match-left]")].map((input) => [input.dataset.matchLeft, input.value]));
+  if (["ordering", "dragdrop"].includes(question.type)) return [...root.querySelectorAll("[data-sequence-answer] .sequence-token")].map((token) => token.dataset.value || "");
+  return [...root.querySelectorAll("input:checked")].map((input) => input.value);
+}
+
+function samePairs(value, expected) {
+  if (!value || !expected || typeof value !== "object" || typeof expected !== "object" || Array.isArray(value) || Array.isArray(expected)) return false;
+  const received = Object.entries(value).map(([left, right]) => [normalise(left), normalise(right)]).sort(([left], [right]) => left.localeCompare(right));
+  const wanted = Object.entries(expected).map(([left, right]) => [normalise(left), normalise(right)]).sort(([left], [right]) => left.localeCompare(right));
+  return JSON.stringify(received) === JSON.stringify(wanted);
+}
+
+function sameSequence(value, expected) {
+  const wanted = Array.isArray(expected) ? expected : [expected];
+  return Array.isArray(value) && value.map(normalise).join("|") === wanted.map(normalise).join("|");
 }
 
 function isCorrect(question, answer) {
   const expected = question.correct_answer;
-  if (Array.isArray(expected)) return Array.isArray(answer) && expected.map(normalise).sort().join("|") === answer.map(normalise).sort().join("|");
+  if (question.type === "matching") return samePairs(answer, expected);
+  if (["ordering", "dragdrop"].includes(question.type)) return sameSequence(answer, expected);
+  if (question.type === "multiple") return Array.isArray(answer) && Array.isArray(expected) && answer.map(normalise).sort().join("|") === expected.map(normalise).sort().join("|");
   const actual = Array.isArray(answer) ? answer[0] : answer;
   return normalise(expected) === normalise(actual);
 }
@@ -73,14 +136,9 @@ function render() {
 }
 
 function submitQuiz() {
-  const supported = selected.filter((question) => ["single", "truefalse", "multiple", "fill"].includes(question.type));
-  if (!supported.length) {
-    document.querySelector("#quizResult").textContent = "Chưa có câu hỏi nào hỗ trợ chấm trong chế độ serverless.";
-    return;
-  }
-  const total = supported.reduce((sum, question) => sum + Math.max(Number(question.score) || 0, 1), 0);
-  const earned = supported.reduce((sum, question) => sum + (isCorrect(question, selectedAnswer(question)) ? Math.max(Number(question.score) || 0, 1) : 0), 0);
-  const score = Math.round((earned / total) * 100);
+  const total = selected.reduce((sum, question) => sum + Number(question.score), 0);
+  const earned = selected.reduce((sum, question) => sum + (isCorrect(question, selectedAnswer(question)) ? Number(question.score) : 0), 0);
+  const score = total ? Math.round((earned / total) * 100) : 0;
   quizSubmitted = true;
   if (CFG.trackScore) {
     SetValue("cmi.score.raw", String(score));
@@ -92,6 +150,35 @@ function submitQuiz() {
   saveState();
   document.querySelector("#quizResult").textContent = `Điểm: ${score}%. ${score >= course.completion.passing_score ? "Đạt" : "Chưa đạt"}.`;
 }
+
+function moveToken(target) {
+  const question = target.closest("[data-question]");
+  const answer = question?.querySelector("[data-sequence-answer]");
+  const bank = question?.querySelector("[data-sequence-bank]");
+  if (!answer || !bank) return;
+  if (target.closest("[data-sequence-answer]")) bank.appendChild(target); else answer.appendChild(target);
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target.closest(".sequence-token") : null;
+  if (target) moveToken(target);
+});
+document.addEventListener("dragstart", (event) => {
+  const target = event.target instanceof Element ? event.target.closest(".sequence-token") : null;
+  if (target) draggingToken = target;
+});
+document.addEventListener("dragover", (event) => {
+  const target = event.target instanceof Element ? event.target.closest("[data-sequence-answer], [data-sequence-bank]") : null;
+  if (target && draggingToken) { event.preventDefault(); target.classList.add("drag-over"); }
+});
+document.addEventListener("dragleave", (event) => {
+  const target = event.target instanceof Element ? event.target.closest("[data-sequence-answer], [data-sequence-bank]") : null;
+  target?.classList.remove("drag-over");
+});
+document.addEventListener("drop", (event) => {
+  const target = event.target instanceof Element ? event.target.closest("[data-sequence-answer], [data-sequence-bank]") : null;
+  if (target && draggingToken) { event.preventDefault(); target.classList.remove("drag-over"); target.appendChild(draggingToken); draggingToken = null; }
+});
 
 function restoreState() {
   if (!CFG.resume) return render();

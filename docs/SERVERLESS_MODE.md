@@ -101,11 +101,21 @@ Nguồn chính thức:
    serverless vẫn có test hợp đồng riêng trong Python.
 7. [x] Chạy runtime đúng tệp được đóng vào ZIP với LMS SCORM 2004 mô phỏng trong
    Chromium: `Initialize`, `GetValue`, `SetValue`, `Commit`, `suspend_data`,
-   `session_time` và `Terminate`. Player serverless chấm được chọn một, đúng/sai,
-   chọn nhiều và điền đáp án; các dạng tương tác khác vẫn cần test ở LMS đích.
+   `session_time` và `Terminate`.
+8. [x] Hoàn thiện và kiểm thử player trong ZIP cho chọn một, đúng/sai, chọn nhiều,
+   điền đáp án, ghép đôi, sắp xếp, kéo-thả và chọn ảnh. Ảnh trong serverless là
+   URL HTTPS, không được đóng vào ZIP, và giáo viên phải xác nhận quyền sử dụng.
 
 ## Điều không tuyên bố
 
 Validator serverless và LMS mô phỏng chỉ xác nhận cấu trúc, vòng đời API và các
 quy tắc kỹ thuật của project. Mỗi trường vẫn phải upload thử ZIP lên tenant
 K12Online trước khi giao học sinh.
+
+### Ảnh trong câu hỏi serverless
+
+Vì chế độ này không có storage, ảnh lựa chọn không thể là asset đã tải lên hay
+video/audio trong ZIP. Giáo viên chỉ có thể dùng URL `https://` và phải tích xác
+nhận quyền sử dụng. Export từ chối URL không an toàn, asset nội bộ, ảnh thiếu mã
+hoặc chưa xác nhận bản quyền. URL bên ngoài vẫn có thể bị chính sách nội dung của
+K12Online chặn, nên cần kiểm tra bằng tenant thật trước khi giao bài.

@@ -19,6 +19,7 @@ describe("Canonical LMS settings", () => {
     const settings = settingsFromCourse(course);
     expect(settings.navigation.mode).toBe("restricted");
     expect(settings.completion.passing_score).toBe(75);
+    expect(settings.completion).toMatchObject({ max_attempts: null, show_feedback: true, show_correct_answer: false });
     expect(settings.scorm.resume).toBe(false);
     expect(settings.scorm.track_success).toBe(false);
   });
@@ -28,7 +29,8 @@ describe("Canonical LMS settings", () => {
     expect(updated.metadata).toEqual(course.metadata);
     expect(updated.objectives).toEqual(course.objectives);
     expect(updated.navigation?.mode).toBe("free");
-    expect(updated.completion).toEqual({ viewed_percent: 90, passing_score: 70, require_quiz: true });
+    expect(updated.completion).toEqual({ viewed_percent: 90, passing_score: 70, require_quiz: true, max_attempts: null, show_feedback: true, show_correct_answer: false });
+    expect(updated.schema_version).toBe("1.1.0");
     expect(updated.scorm?.preset).toBe("k12online");
   });
 
@@ -40,5 +42,8 @@ describe("Canonical LMS settings", () => {
       expect.stringContaining("chưa có câu hỏi"),
       expect.stringContaining("không nhận điểm"),
     ]));
+    settings.completion.show_correct_answer = true;
+    settings.completion.show_feedback = false;
+    expect(lmsWarnings(settings, 1)).toContain("Đang bật hiện đáp án đúng nhưng phản hồi sau khi nộp đang bị ẩn.");
   });
 });

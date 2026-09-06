@@ -48,6 +48,7 @@ export type CourseQuestion = {
 };
 
 export type CanonicalCourse = {
+  schema_version?: "1.0.0" | "1.1.0";
   id: string;
   revision: number;
   metadata: {
@@ -73,6 +74,9 @@ export type CanonicalCourse = {
     viewed_percent: number;
     passing_score: number;
     require_quiz: boolean;
+    max_attempts?: number | null;
+    show_feedback?: boolean;
+    show_correct_answer?: boolean;
   };
   scorm?: {
     standard: "SCORM_2004";
@@ -164,6 +168,19 @@ export type ExportRecord = {
   byte_size: number;
   status: string;
   created_at: string | null;
+};
+
+export type ExportJob = {
+  id: string;
+  project_id: string;
+  input_revision: number;
+  status: "queued" | "running" | "failed" | "ready";
+  export_id: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 export type ScormExport = {
@@ -506,6 +523,30 @@ export async function listExports(): Promise<ExportRecord[]> {
   const response = await fetch("/api/v1/exports", { credentials: "include" });
   if (!response.ok) throw new Error((await message(response)) || "Không thể tải lịch sử xuất bản.");
   return response.json() as Promise<ExportRecord[]>;
+}
+
+export async function queueScormExport(projectId: string): Promise<ExportJob> {
+  const response = await fetch(`/api/v1/projects/${projectId}/exports/scorm2004/jobs`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể đưa yêu cầu xuất SCORM vào hàng đợi.");
+  return response.json() as Promise<ExportJob>;
+}
+
+export async function getExportJob(jobId: string): Promise<ExportJob> {
+  const response = await fetch(`/api/v1/export-jobs/${encodeURIComponent(jobId)}`, { credentials: "include" });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể kiểm tra trạng thái xuất SCORM.");
+  return response.json() as Promise<ExportJob>;
+}
+
+export async function downloadExport(exportId: string): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`/api/v1/exports/${encodeURIComponent(exportId)}/content`, { credentials: "include" });
+  if (!response.ok) throw new Error((await message(response)) || "Không thể tải ZIP SCORM đã xuất.");
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get("Content-Disposition")),
+  };
 }
 
 function exportPayload(project: Project) {

@@ -14,10 +14,46 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "serverless"))
 
-from studio.app import app, player_js, runtime_js  # noqa: E402
+from studio.app import app, player_js, runtime_js, mock_course, GenerationPayload  # noqa: E402
 
 
 class ServerlessDeploymentTests(unittest.TestCase):
+    def test_invalid_courses_are_rejected_by_preview_and_export(self):
+        base = mock_course(GenerationPayload(title="Audit", source="Nội dung bài học đủ dài cho kiểm tra.", direction="lesson")).model_dump()
+        cases = []
+        course = copy.deepcopy(base); course["slides"] = []; cases.append(course)
+        course = copy.deepcopy(base); course["slides"][1]["id"] = course["slides"][0]["id"]; cases.append(course)
+        course = copy.deepcopy(base); course["question_bank"] = []; cases.append(course)
+        for fields in (
+            {"correct_answer": "Không có trong lựa chọn"},
+            {"options": ["A", " a "], "correct_answer": "A"},
+            {"type": "fill", "correct_answer": ["A"]},
+            {"type": "truefalse", "options": ["A", "B", "C"], "correct_answer": "A"},
+            {"type": "multiple", "options": ["A", "B"], "correct_answer": ["A", "A"]},
+            {"type": "ordering", "options": ["A", "B"], "correct_answer": ["A"]},
+            {"objective_ids": ["missing"]},
+        ):
+            course = copy.deepcopy(base); course["question_bank"][0].update(fields); cases.append(course)
+        client = TestClient(app)
+        for index, course in enumerate(cases):
+            with self.subTest(case=index):
+                self.assertEqual(client.post("/api/serverless/preview", json=course).status_code, 422)
+                self.assertEqual(client.post("/api/serverless/export", json={"course": course}).status_code, 422)
+
+    def test_preview_is_self_contained_but_export_keeps_packaged_scripts(self):
+        course = mock_course(GenerationPayload(title="Audit", source="Nội dung bài học đủ dài cho kiểm tra.", direction="lesson")).model_dump()
+        client = TestClient(app)
+        preview = client.post("/api/serverless/preview", json=course)
+        self.assertEqual(preview.status_code, 200)
+        self.assertNotIn('<script src=', preview.text)
+        self.assertIn("function render()", preview.text)
+        course["question_bank"] = []
+        course["completion"]["require_quiz"] = False
+        exported = client.post("/api/serverless/export", json={"course": course})
+        self.assertEqual(exported.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+            self.assertIn('<script src="player.js">', archive.read("index.html").decode())
+
     def test_vercel_function_includes_packaged_runtime_files(self):
         config = json.loads((ROOT / "serverless" / "vercel.json").read_text(encoding="utf-8"))
         self.assertEqual(config["functions"]["api/index.py"]["includeFiles"], "studio/*.js")
@@ -27,8 +63,18 @@ class ServerlessDeploymentTests(unittest.TestCase):
         for token in (
             "API_1484_11", "Initialize", "GetValue", "SetValue", "Commit", "Terminate",
             "cmi.suspend_data", "cmi.session_time", "scormResume", "scormFinish",
+            "SCORM_SUSPEND_DATA_BUDGET", "scorm:suspend-status",
         ):
             self.assertIn(token, runtime)
+        player = player_js()
+        for token in ("cmi.interactions", ".learner_response", ".result", ".latency"):
+            self.assertIn(token, player)
+
+    def test_export_filename_transliterates_vietnamese_safely(self):
+        course = mock_course(GenerationPayload(title="Kiểm thử tiếng Việt", source="Nội dung đủ dài để tạo bài kiểm thử.", direction="lesson"))
+        response = TestClient(app).post("/api/serverless/export", json={"course": course.model_dump(mode="json")})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn('filename="Kiem_thu_tieng_Viet_SCORM2004.zip"', response.headers["Content-Disposition"])
 
     def test_provider_catalog_exposes_capability_not_credentials(self):
         response = TestClient(app).get("/api/serverless/providers")
@@ -71,7 +117,7 @@ class ServerlessDeploymentTests(unittest.TestCase):
         client = TestClient(app)
         self.assertEqual(client.get("/healthz").json()["mode"], "stateless")
         self.assertEqual(client.post("/api/serverless/quality", json=course).status_code, 200)
-        self.assertIn("runtime.js", client.post("/api/serverless/preview", json=course).text)
+        self.assertIn("function Initialize()", client.post("/api/serverless/preview", json=course).text)
         exported = client.post("/api/serverless/export", json={"course": course})
         self.assertEqual(exported.status_code, 200, exported.text)
         with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:

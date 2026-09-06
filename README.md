@@ -147,8 +147,10 @@ and independent score/completion/success tracking.
 The Next.js Step 8 screen keeps export authoritative on FastAPI: it shows deterministic,
 non-blocking authoring-quality guidance for the saved `course.json`, then requests a package by
 project ID. FastAPI rebuilds from canonical data, validates the SCORM file map and ZIP before
-recording/exporting it. The browser immediately receives the successful ZIP and shows only the
-current project's export metadata history. This technical gate does not certify real K12Online
+recording/exporting it. Small packages download immediately; the optional **Xuất nền** path pins
+the project revision in PostgreSQL, sends only an opaque job id through Redis and lets the teacher
+download the completed private ZIP after the worker finishes. The browser shows only the current
+project's export metadata history. This technical gate does not certify real K12Online
 interoperability; use the manual tenant test checklist before release.
 
 ## Milestone 11: production deployment
@@ -159,7 +161,8 @@ backup service to a separate Cloudflare R2 bucket. See [docs/DEPLOYMENT.md](docs
 the VPS release procedure and [docs/RESTORE_DRILL.md](docs/RESTORE_DRILL.md) for the required
 quarterly recovery drill. The completed Next.js frontend runs on Vercel while FastAPI remains on
 the VPS; see [docs/VERCEL_FRONTEND.md](docs/VERCEL_FRONTEND.md) for the required same-origin proxy,
-DNS and Google OAuth cutover. Actual background-job handlers remain separate work.
+DNS and Google OAuth cutover. The Redis worker now handles SCORM export jobs; AI and media
+generation remain request-bound until their own bounded queue contracts and cost controls exist.
 
 ## Milestone 12.1: quality checks
 

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { type CanonicalCourse, type CourseQuestion, type Project, type QuestionDifficulty, type QuestionType } from "@/lib/api";
 import { getLocalProject as getProject, updateLocalCanonicalCourse as updateCanonicalCourse } from "@/lib/local-workspace";
 import { answerToEditorText, imageOptionsToEditorText, parseEditorAnswer, parseImageOptions, questionWarnings } from "@/lib/quiz";
+import { consumeQualityFocus } from "@/lib/export";
 
 type SaveTone = "idle" | "loading" | "saved" | "error";
 type QuestionFilter = "all" | "selected" | "unselected";
@@ -46,7 +47,7 @@ function normalizeAnswer(question: CourseQuestion, type: QuestionType): unknown 
 export default function QuizEditor({ project, onProjectChange, onSaveState }: QuizEditorProps) {
   const [course, setCourse] = useState<CanonicalCourse>(() => cloneCourse(project.course));
   const [serverProject, setServerProject] = useState(project);
-  const [selectedQuestionId, setSelectedQuestionId] = useState(project.course.question_bank[0]?.id ?? "");
+  const [selectedQuestionId, setSelectedQuestionId] = useState(() => consumeQualityFocus("question", project.course.question_bank.map((question) => question.id)) ?? project.course.question_bank[0]?.id ?? "");
   const [filter, setFilter] = useState<QuestionFilter>("all");
   const [editVersion, setEditVersion] = useState(0);
   const [savedVersion, setSavedVersion] = useState(0);

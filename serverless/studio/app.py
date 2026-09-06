@@ -4,8 +4,10 @@ from __future__ import annotations
 import html
 import io
 import json
+import math
 import os
 import re
+import unicodedata
 import zipfile
 from pathlib import Path
 from typing import Any, Literal
@@ -16,7 +18,7 @@ from xml.etree import ElementTree
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MAX_ZIP_BYTES = 4 * 1024 * 1024
 
@@ -86,6 +88,9 @@ class Completion(StrictModel):
     viewed_percent: int = Field(ge=0, le=100)
     passing_score: int = Field(ge=0, le=100)
     require_quiz: bool
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    show_feedback: bool = True
+    show_correct_answer: bool = False
 
 
 class Scorm(StrictModel):
@@ -99,7 +104,7 @@ class Scorm(StrictModel):
 
 
 class Course(StrictModel):
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "1.1.0"] = "1.1.0"
     id: str
     revision: int = Field(ge=1)
     metadata: Metadata
@@ -110,6 +115,11 @@ class Course(StrictModel):
     navigation: Navigation
     completion: Completion
     scorm: Scorm
+
+    @model_validator(mode="after")
+    def migrate_schema(self):
+        self.schema_version = "1.1.0"
+        return self
 
 
 class ExportPayload(StrictModel):
@@ -128,6 +138,20 @@ def _safe_json(value: object) -> str:
 
 
 def _assert_serverless_course(course: Course) -> None:
+    if not course.slides:
+        raise ValueError("Bài giảng cần ít nhất một slide trước khi xem trước hoặc xuất.")
+    for label, ids in (
+        ("slide", [slide.id for slide in course.slides]),
+        ("câu hỏi", [question.id for question in course.question_bank]),
+        ("mục tiêu", [objective.get("id", "") for objective in course.objectives]),
+    ):
+        if any(not value.strip() for value in ids) or len(ids) != len(set(ids)):
+            raise ValueError(f"Mã {label} phải có giá trị và không được trùng.")
+    objective_ids = {objective.get("id") for objective in course.objectives}
+    if any(set(question.objective_ids) - objective_ids for question in course.question_bank if question.selected):
+        raise ValueError("Câu hỏi đang liên kết tới mục tiêu không tồn tại.")
+    if course.completion.require_quiz and not any(question.selected for question in course.question_bank):
+        raise ValueError("Cấu hình yêu cầu nộp quiz nhưng chưa chọn câu hỏi nào.")
     if any(block.asset_id or block.type in {"image", "audio", "video"} for slide in course.slides for block in slide.blocks):
         raise ValueError("Chế độ serverless không đóng gói ảnh, audio hoặc video. Hãy bỏ media trước khi xuất.")
     interaction_errors = [error for question in course.question_bank if question.selected for error in [_interaction_error(question)] if error]
@@ -151,12 +175,23 @@ def _interaction_error(question: Question) -> str | None:
     prefix = f"Câu hỏi “{question.question[:80]}”"
     if not question.question.strip():
         return f"{prefix} thiếu nội dung."
-    if question.score <= 0:
+    if not math.isfinite(question.score) or question.score <= 0:
         return f"{prefix} phải có điểm lớn hơn 0."
     if question.correct_answer in (None, "", [], {}):
         return f"{prefix} thiếu đáp án đúng."
     if question.type in {"single", "multiple", "truefalse", "ordering", "dragdrop"} and len(question.options) < 2:
         return f"{prefix} cần ít nhất hai phương án."
+    if question.type in {"single", "multiple", "truefalse", "ordering", "dragdrop"}:
+        normalized = [option.strip().lower() for option in question.options]
+        if not all(normalized) or len(normalized) != len(set(normalized)):
+            return f"{prefix} có phương án trống hoặc trùng nhau."
+    if question.type in {"single", "truefalse"}:
+        if not isinstance(question.correct_answer, str) or question.correct_answer not in question.options:
+            return f"{prefix} có đáp án không nằm trong các phương án."
+        if question.type == "truefalse" and len(question.options) != 2:
+            return f"{prefix} dạng đúng/sai cần đúng hai phương án."
+    if question.type == "fill" and (not isinstance(question.correct_answer, str) or not question.correct_answer.strip()):
+        return f"{prefix} cần đáp án văn bản không trống."
     if question.type in {"multiple", "ordering", "dragdrop"}:
         if not isinstance(question.correct_answer, list) or not question.correct_answer:
             return f"{prefix} cần đáp án dạng danh sách theo thứ tự."
@@ -164,6 +199,10 @@ def _interaction_error(question: Question) -> str | None:
             return f"{prefix} có đáp án danh sách không hợp lệ."
         if any(str(item) not in question.options for item in question.correct_answer):
             return f"{prefix} có đáp án không nằm trong các phương án."
+        if len(question.correct_answer) != len(set(question.correct_answer)):
+            return f"{prefix} có đáp án lặp lại."
+        if question.type in {"ordering", "dragdrop"} and set(question.correct_answer) != set(question.options):
+            return f"{prefix} cần sắp xếp đầy đủ các phương án."
     if question.type == "matching":
         if not isinstance(question.correct_answer, dict) or len(question.correct_answer) < 2:
             return f"{prefix} cần ít nhất hai cặp ghép."
@@ -249,7 +288,7 @@ def manifest(title: str) -> str:
 <manifest identifier="AI_SCORM_STUDIO" xmlns="http://www.imsglobal.org/xsd/imscp_v1p1" xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_v1p3" xmlns:imsss="http://www.imsglobal.org/xsd/imsss"><metadata><schema>ADL SCORM</schema><schemaversion>2004 4th Edition</schemaversion></metadata><organizations default="ORG-1"><organization identifier="ORG-1"><title>{safe}</title><item identifier="ITEM-1" identifierref="RES-1"><title>{safe}</title></item></organization></organizations><resources><resource identifier="RES-1" type="webcontent" adlcp:scormType="sco" href="index.html"><file href="index.html"/><file href="runtime.js"/><file href="player.js"/></resource></resources></manifest>'''
 
 
-def render_html(course: Course) -> str:
+def render_html(course: Course, *, standalone_preview: bool = False) -> str:
     title = html.escape(course.metadata.title)
     payload = _safe_json(course.model_dump(mode="json"))
     config = _safe_json({
@@ -258,14 +297,21 @@ def render_html(course: Course) -> str:
         "trackCompletion": course.scorm.track_completion,
         "trackSuccess": course.scorm.track_success,
     })
+    scripts = '<script src="runtime.js"></script><script src="player.js"></script>'
+    if standalone_preview:
+        # srcDoc has no ZIP-relative asset paths. Embed the exact packaged scripts instead.
+        scripts = "".join("<script>" + code.replace("</script", "<\\/script") + "</script>" for code in (runtime_js(), player_js()))
     return f'''<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
 <style>
-body{{margin:0;font:18px system-ui;background:#f4f7fb;color:#10233f}}main{{max-width:920px;margin:0 auto;padding:32px}}article{{background:#fff;border-radius:16px;padding:32px;box-shadow:0 8px 30px #10233f18}}.eyebrow{{color:#3157d5;font-weight:700;font-size:13px}}button{{padding:10px 16px;margin:16px 8px 0 0}}#progress{{font-size:14px;color:#52647a}}.question{{margin-top:18px;padding:16px;border:1px solid #dfe6f0;border-radius:12px}}.option{{display:block;margin:8px 0}}.answer{{width:100%;padding:9px;box-sizing:border-box}}.answers{{display:grid;gap:10px;margin-top:14px}}.matching-option{{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,1fr);gap:12px;align-items:center;background:#fff;padding:10px;border-radius:8px}}.matching-option select{{padding:9px}}.sequence-bank,.sequence-answer{{min-height:54px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}}.sequence-answer{{margin:8px 0;padding-left:36px;border:2px dashed #8297ca}}.sequence-token{{margin:0;background:#eef3ff;border:1px solid #9eb0de;border-radius:8px;cursor:grab}}.drag-over{{background:#e7efff}}.interaction-help{{margin:0;color:#52647a;font-size:14px}}.image-option{{display:grid;grid-template-columns:22px minmax(96px,160px) 1fr;gap:10px;align-items:center;background:#fff;padding:10px;border-radius:8px}}.image-option img{{width:160px;height:96px;object-fit:cover;border-radius:8px;border:1px solid #d6dde9}}@media(max-width:600px){{main{{padding:16px}}.matching-option{{grid-template-columns:1fr}}.image-option{{grid-template-columns:22px 1fr}}.image-option img{{grid-column:2;width:100%;height:auto}}}}
+:root{{--accent:#3157d5}}[hidden]{{display:none!important}}
+#slide-menu{{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}}#slide-menu button{{margin:0;border:1px solid #ccd5e4;background:white;border-radius:8px;color:#10233f}}#slide-menu button[aria-current]{{background:var(--accent);color:white}}button:disabled{{opacity:.5;cursor:not-allowed}}button:focus-visible{{outline:3px solid var(--accent);outline-offset:3px}}
+.layout-two_column .slide-body{{column-count:2;column-gap:32px}}.layout-callout .slide-body,.callout-block{{border-left:5px solid var(--accent);padding:12px 20px;background:#f4f7fb}}.layout-quiz{{border-top:5px solid var(--accent)}}.slide-body{{overflow-wrap:anywhere}}@media(max-width:760px){{.layout-two_column .slide-body{{column-count:1}}}}
+body{{margin:0;font:18px system-ui;background:#f4f7fb;color:#10233f}}main{{max-width:920px;margin:0 auto;padding:32px}}article{{background:#fff;border-radius:16px;padding:32px;box-shadow:0 8px 30px #10233f18}}.eyebrow{{color:#3157d5;font-weight:700;font-size:13px}}.resume-warning{{padding:12px 16px;border:1px solid #d99d35;border-radius:10px;background:#fff8e7;color:#704b08;font-size:14px;font-weight:650}}button{{padding:10px 16px;margin:16px 8px 0 0}}#progress{{font-size:14px;color:#52647a}}.question{{margin-top:18px;padding:16px;border:1px solid #dfe6f0;border-radius:12px}}.question.correct{{border-color:#4b9b70;background:#f2fbf6}}.question.incorrect{{border-color:#cf6c75;background:#fff5f5}}.question-feedback{{margin:12px 0 0;font-size:14px;font-weight:650}}.question.correct .question-feedback{{color:#17643c}}.question.incorrect .question-feedback{{color:#9d2935}}.option{{display:block;margin:8px 0}}.answer{{width:100%;padding:9px;box-sizing:border-box}}.answers{{display:grid;gap:10px;margin-top:14px}}.matching-option{{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,1fr);gap:12px;align-items:center;background:#fff;padding:10px;border-radius:8px}}.matching-option select{{padding:9px}}.sequence-bank,.sequence-answer{{min-height:54px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}}.sequence-answer{{margin:8px 0;padding-left:36px;border:2px dashed #8297ca}}.sequence-token{{margin:0;background:#eef3ff;border:1px solid #9eb0de;border-radius:8px;cursor:grab}}.drag-over{{background:#e7efff}}.interaction-help{{margin:0;color:#52647a;font-size:14px}}.image-option{{display:grid;grid-template-columns:22px minmax(96px,160px) 1fr;gap:10px;align-items:center;background:#fff;padding:10px;border-radius:8px}}.image-option img{{width:160px;height:96px;object-fit:cover;border-radius:8px;border:1px solid #d6dde9}}@media(max-width:600px){{main{{padding:16px}}.matching-option{{grid-template-columns:1fr}}.image-option{{grid-template-columns:22px 1fr}}.image-option img{{grid-column:2;width:100%;height:auto}}}}
 </style></head><body><main><p class="eyebrow">AI SCORM STUDIO • SCORM 2004</p><article id="player"></article><button id="back">← Trước</button><button id="next">Tiếp →</button><p id="progress"></p></main>
 <script>window.SCORM_CFG={config};</script>
 <script id="course-data" type="application/json">{payload}</script>
-<script src="runtime.js"></script><script src="player.js"></script>
+{scripts}
 </body></html>'''
 
 
@@ -285,8 +331,11 @@ def validate(files: dict[str, bytes], course: Course) -> list[str]:
         if not {"index.html", "runtime.js", "player.js"}.issubset(hrefs): errors.append("Manifest phải tham chiếu index.html, runtime.js và player.js.")
     except ElementTree.ParseError: errors.append("imsmanifest.xml không hợp lệ.")
     runtime = files["runtime.js"]
-    required_runtime_tokens = (b"API_1484_11", b"Initialize", b"GetValue", b"SetValue", b"Commit", b"Terminate", b"cmi.session_time")
+    required_runtime_tokens = (b"API_1484_11", b"Initialize", b"GetValue", b"SetValue", b"Commit", b"Terminate", b"cmi.session_time", b"cmi.suspend_data", b"SCORM_SUSPEND_DATA_BUDGET", b"scorm:suspend-status")
     if any(token not in runtime for token in required_runtime_tokens): errors.append("Thiếu SCORM 2004 runtime đầy đủ.")
+    player = files["player.js"]
+    required_interaction_tokens = (b"cmi.interactions", b".learner_response", b".result", b".latency")
+    if any(token not in player for token in required_interaction_tokens): errors.append("Player thiếu theo dõi interaction SCORM 2004.")
     if not 0 <= course.completion.passing_score <= 100: errors.append("Điểm đạt không hợp lệ.")
     return errors
 
@@ -307,7 +356,8 @@ def make_zip(course: Course) -> tuple[bytes, str]:
     package = buffer.getvalue()
     if len(package) > MAX_ZIP_BYTES: raise ValueError("ZIP vượt giới hạn 4 MB của chế độ serverless.")
     if zipfile.ZipFile(io.BytesIO(package)).testzip(): raise ValueError("ZIP SCORM bị lỗi.")
-    name = re.sub(r"[^A-Za-z0-9_-]+", "_", course.metadata.title).strip("_") or "bai_giang"
+    latin_title = unicodedata.normalize("NFKD", course.metadata.title.replace("đ", "d").replace("Đ", "D")).encode("ascii", "ignore").decode("ascii")
+    name = re.sub(r"[^A-Za-z0-9_-]+", "_", latin_title).strip("_") or "bai_giang"
     return package, f"{name}_SCORM2004.zip"
 
 
@@ -340,7 +390,7 @@ def quality(course: Course): return quality_report(course)
 def preview(course: Course):
     try:
         _assert_serverless_course(course)
-        return render_html(course)
+        return render_html(course, standalone_preview=True)
     except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

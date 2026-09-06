@@ -4,9 +4,13 @@
   "title": "AI SCORM Studio Course",
   "type": "object",
   "additionalProperties": false,
+  "allOf": [{
+    "if": {"properties": {"schema_version": {"const": "1.1.0"}}},
+    "then": {"properties": {"completion": {"required": ["viewed_percent", "passing_score", "require_quiz", "max_attempts", "show_feedback", "show_correct_answer"]}}}
+  }],
   "required": ["schema_version", "id", "revision", "metadata", "objectives", "slides", "question_bank", "theme", "navigation", "completion", "scorm"],
   "properties": {
-    "schema_version": {"type": "string", "const": "1.0.0"},
+    "schema_version": {"type": "string", "enum": ["1.0.0", "1.1.0"]},
     "id": {"type": "string", "minLength": 1},
     "revision": {"type": "integer", "minimum": 1},
     "metadata": {
@@ -109,7 +113,10 @@
       "properties": {
         "viewed_percent": {"type": "integer", "minimum": 0, "maximum": 100},
         "passing_score": {"type": "integer", "minimum": 0, "maximum": 100},
-        "require_quiz": {"type": "boolean"}
+        "require_quiz": {"type": "boolean"},
+        "max_attempts": {"type": ["integer", "null"], "minimum": 1, "maximum": 10, "default": null},
+        "show_feedback": {"type": "boolean", "default": true},
+        "show_correct_answer": {"type": "boolean", "default": false}
       }
     },
     "scorm": {

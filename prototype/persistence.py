@@ -267,6 +267,29 @@ class ExportRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ExportJob(Base):
+    """Durable state for a background SCORM export.
+
+    Redis contains only the job id.  The database remains the source of truth so a
+    worker restart cannot lose the author-visible status or a safe failure reason.
+    """
+
+    __tablename__ = "export_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    job_type: Mapped[str] = mapped_column(String(30), default="scorm2004")
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    input_revision: Mapped[int] = mapped_column(Integer)
+    export_record_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("export_records.id"), nullable=True, index=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message_safe: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 def make_session_factory(url: str | None = None):
     selected_url = url or database_url()
     connect_args = {"check_same_thread": False} if selected_url.startswith("sqlite") else {}

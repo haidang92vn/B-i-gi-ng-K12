@@ -8,6 +8,7 @@ import {
   type Project,
 } from "@/lib/api";
 import { getLocalProject as getProject, regenerateLocalSlide as regenerateProjectSlide, updateLocalCanonicalCourse as updateCanonicalCourse } from "@/lib/local-workspace";
+import { consumeQualityFocus } from "@/lib/export";
 
 type SaveTone = "idle" | "loading" | "saved" | "error";
 
@@ -49,7 +50,7 @@ function slideText(slide: CourseSlide) {
 export default function CourseEditor({ project, sourceText, provider, credentialId, onProjectChange, onSaveState }: CourseEditorProps) {
   const [course, setCourse] = useState<CanonicalCourse>(() => cloneCourse(project.course));
   const [serverProject, setServerProject] = useState(project);
-  const [selectedSlideId, setSelectedSlideId] = useState(project.course.slides[0]?.id ?? "");
+  const [selectedSlideId, setSelectedSlideId] = useState(() => consumeQualityFocus("slide", project.course.slides.map((slide) => slide.id)) ?? project.course.slides[0]?.id ?? "");
   const [editVersion, setEditVersion] = useState(0);
   const [savedVersion, setSavedVersion] = useState(0);
   const [saving, setSaving] = useState(false);

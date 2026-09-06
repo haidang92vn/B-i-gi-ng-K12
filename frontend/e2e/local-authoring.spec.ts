@@ -44,7 +44,10 @@ async function mockServerless(page: Page) {
     revision: mockCourse.revision,
     score: 60,
     summary: { warnings: 4, info: 0, checked_slides: 4, checked_questions: 8 },
-    findings: [],
+    findings: [
+      { code: "SLIDE_NOT_APPROVED", severity: "warning", scope: "slide", item_id: "s3", title: "Slide chưa được duyệt", message: "Ví dụ – vận dụng vẫn là bản nháp.", suggestion: "Duyệt nội dung." },
+      { code: "QUESTION_INCOMPLETE", severity: "warning", scope: "question", item_id: "q4", title: "Câu hỏi chưa hoàn chỉnh", message: "Câu 4 thiếu đáp án.", suggestion: "Sửa câu hỏi." },
+    ],
     blocking: false,
   } }));
   await page.route("**/api/serverless/preview", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Preview</title><p>Player SCORM</p>" }));
@@ -54,6 +57,55 @@ async function mockServerless(page: Page) {
     body: "mock-zip",
   }));
 }
+
+async function openReview(page: Page) {
+  await mockServerless(page);
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles({ name: "course.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(mockCourse)) });
+  await expect(page.getByLabel("Tiêu đề")).toHaveValue("Khởi động");
+}
+
+test("leaving review immediately waits for autosave and survives reload", async ({ page }) => {
+  await openReview(page);
+  await page.getByLabel("Tiêu đề").fill("Tiêu đề vừa sửa");
+  await page.getByRole("button", { name: /Kiểm tra & xuất/ }).click();
+  await expect(page.getByRole("heading", { name: "Kiểm tra & xuất" })).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: /Giáo viên duyệt/ }).click();
+  await expect(page.getByLabel("Tiêu đề")).toHaveValue("Tiêu đề vừa sửa");
+});
+
+test("cancelling a new lesson preserves the current draft", async ({ page }) => {
+  await openReview(page);
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "+ Bài mới" }).click();
+  await expect(page.getByLabel("Tiêu đề")).toHaveValue("Khởi động");
+  await page.reload();
+  await page.getByRole("button", { name: /Giáo viên duyệt/ }).click();
+  await expect(page.getByLabel("Tiêu đề")).toHaveValue("Khởi động");
+});
+
+test("storage failure keeps unsaved edits visible and retry persists them", async ({ page }) => {
+  await openReview(page);
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (!sessionStorage.getItem("audit-storage-recovered")) throw new DOMException("Full", "QuotaExceededError");
+      return original.call(this, key, value);
+    };
+    Object.assign(window, { recoverStorage: () => { Storage.prototype.setItem = original; } });
+  });
+  await page.getByLabel("Tiêu đề").fill("Giữ lại khi hết chỗ");
+  await expect(page.getByRole("status")).toContainText("Không thể lưu trên trình duyệt");
+  await page.getByRole("button", { name: /Kiểm tra & xuất/ }).click();
+  await expect(page.getByLabel("Tiêu đề")).toHaveValue("Giữ lại khi hết chỗ");
+  await page.evaluate(() => (window as typeof window & { recoverStorage: () => void }).recoverStorage());
+  await page.getByRole("button", { name: "Thử lưu lại" }).click();
+  await expect(page.getByRole("heading", { name: "Kiểm tra & xuất" })).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: /Giáo viên duyệt/ }).click();
+  await expect(page.getByLabel("Tiêu đề")).toHaveValue("Giữ lại khi hết chỗ");
+});
 
 test("teacher can create with Mock AI, review warnings, and download a SCORM ZIP", async ({ page }) => {
   await mockServerless(page);
@@ -74,7 +126,7 @@ test("teacher can create with Mock AI, review warnings, and download a SCORM ZIP
 
   await page.getByRole("button", { name: /Kiểm tra & xuất/ }).click();
   await page.getByRole("button", { name: "Kiểm tra chất lượng" }).click();
-  await expect(page.getByText("4 cảnh báo cần giáo viên xem lại.")).toBeVisible();
+  await expect(page.getByText("4 cảnh báo • 4 slide • 8 câu hỏi")).toBeVisible();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Tải ZIP SCORM" }).click();
   await expect((await download).suggestedFilename()).toBe("Vong_tuan_hoan_nuoc_SCORM2004.zip");
@@ -93,4 +145,32 @@ test("teacher can restore a valid course.json backup into the review step", asyn
   await expect(page.getByRole("status")).toContainText("Đã khôi phục “Vòng tuần hoàn nước” từ course.json");
   await expect(page.getByRole("heading", { name: "Giáo viên duyệt" })).toBeVisible();
   await expect(page.getByLabel("Tiêu đề")).toHaveValue("Khởi động");
+});
+
+test("quality findings take the teacher to the owning slide or quiz editor", async ({ page }) => {
+  await openReview(page);
+  await page.getByRole("button", { name: /Kiểm tra & xuất/ }).click();
+  await page.getByRole("button", { name: "Kiểm tra chất lượng" }).click();
+  await expect(page.getByText("Slide chưa được duyệt")).toBeVisible();
+  await page.getByRole("button", { name: "Mở Bước 4: Duyệt slide" }).click();
+  await expect(page.getByRole("heading", { name: "Giáo viên duyệt" })).toBeVisible();
+  await expect(page.getByLabel("Tiêu đề")).toHaveValue("Ví dụ – vận dụng");
+  await page.getByRole("button", { name: /Kiểm tra & xuất/ }).click();
+  await page.getByRole("button", { name: "Kiểm tra chất lượng" }).click();
+  await page.getByRole("button", { name: "Mở Bước 5: Chọn Quiz" }).click();
+  await expect(page.getByRole("heading", { name: "Chọn Quiz" })).toBeVisible();
+  await expect(page.getByLabel("Nội dung câu hỏi")).toHaveValue("Câu 4: Nước bốc hơi tạo thành gì?");
+});
+
+test("teacher quiz policy is saved in canonical course settings", async ({ page }) => {
+  await openReview(page);
+  await page.getByRole("button", { name: /Cấu hình LMS/ }).click();
+  await page.getByLabel(/Số lượt làm quiz/).selectOption("2");
+  await page.getByLabel(/Hiện đáp án đúng/).check();
+  await expect(page.getByRole("status")).toContainText("Đã lưu cấu hình");
+  await page.reload();
+  await page.getByRole("button", { name: /Cấu hình LMS/ }).click();
+  await expect(page.getByLabel(/Số lượt làm quiz/)).toHaveValue("2");
+  await expect(page.getByLabel(/Hiện phản hồi sau khi nộp/)).toBeChecked();
+  await expect(page.getByLabel(/Hiện đáp án đúng/)).toBeChecked();
 });

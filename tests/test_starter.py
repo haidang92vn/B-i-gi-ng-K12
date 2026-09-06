@@ -13,7 +13,7 @@ import zipfile
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 from openpyxl import Workbook
-from prototype.course_models import Block, Question, Slide, new_course
+from prototype.course_models import Block, Course, Question, Slide, new_course
 from prototype.quiz_scoring import score_question
 from prototype.scorm_runtime import FakeScorm2004API, ScormRuntime
 from prototype.logging_config import redact
@@ -100,6 +100,21 @@ class CourseContractTests(unittest.TestCase):
         schema = json.loads((ROOT / "schemas/course.schema.json").read_text(encoding="utf-8"))
         example = json.loads((ROOT / "examples/course.example.json").read_text(encoding="utf-8"))
         Draft202012Validator(schema).validate(example)
+
+    def test_course_1_0_is_migrated_to_quiz_policy_1_1_defaults(self):
+        legacy = new_course("Bài cũ").model_dump(mode="json")
+        legacy["schema_version"] = "1.0.0"
+        for key in ("max_attempts", "show_feedback", "show_correct_answer"):
+            legacy["completion"].pop(key, None)
+        migrated = Course.model_validate(legacy)
+        self.assertEqual(migrated.schema_version, "1.1.0")
+        self.assertIsNone(migrated.completion.max_attempts)
+        self.assertTrue(migrated.completion.show_feedback)
+        self.assertFalse(migrated.completion.show_correct_answer)
+
+        legacy["completion"]["max_attempts"] = 0
+        with self.assertRaises(ValueError):
+            Course.model_validate(legacy)
 
     def test_quiz_scoring_is_deterministic(self):
         def question(kind, correct):
@@ -735,6 +750,98 @@ class PrototypeTests(unittest.TestCase):
             with self.module.SessionLocal() as db:
                 identities = db.scalars(self.module.select(self.module.OAuthIdentity).where(self.module.OAuthIdentity.provider == "google", self.module.OAuthIdentity.subject == subject)).all()
                 self.assertEqual(len(identities), 1)
+
+    def test_scorm_export_job_records_a_revision_pinned_redis_request(self):
+        client = TestClient(self.module.app)
+        registered = client.post("/api/v1/auth/register", json={"email": f"export-job-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        self.assertEqual(registered.status_code, 201, registered.text)
+        project = client.post("/api/v1/projects", json={"title": "Xuất nền", "direction": "lesson"})
+        self.assertEqual(project.status_code, 201, project.text)
+
+        queued_ids: list[str] = []
+        with patch.object(self.module, "enqueue_export_job", side_effect=queued_ids.append):
+            queued = client.post(f"/api/v1/projects/{project.json()['id']}/exports/scorm2004/jobs")
+        self.assertEqual(queued.status_code, 202, queued.text)
+        payload = queued.json()
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(payload["input_revision"], 1)
+        self.assertEqual(queued_ids, [payload["id"]])
+        self.assertNotIn(project.json()["course"]["metadata"]["title"], str(queued_ids))
+
+        status_response = client.get(f"/api/v1/export-jobs/{payload['id']}")
+        self.assertEqual(status_response.status_code, 200, status_response.text)
+        self.assertEqual(status_response.json()["id"], payload["id"])
+        outsider = TestClient(self.module.app)
+        outsider.post("/api/v1/auth/register", json={"email": f"export-job-outsider-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        self.assertEqual(outsider.get(f"/api/v1/export-jobs/{payload['id']}").status_code, 404)
+
+    def test_scorm_export_job_fails_safely_when_redis_is_unavailable(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"export-queue-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        project = client.post("/api/v1/projects", json={"title": "Hàng đợi lỗi", "direction": "lesson"}).json()
+        with patch.object(self.module, "enqueue_export_job", side_effect=self.module.QueueUnavailable("do not expose redis details")):
+            response = client.post(f"/api/v1/projects/{project['id']}/exports/scorm2004/jobs")
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "EXPORT_QUEUE_UNAVAILABLE")
+        self.assertNotIn("redis details", response.text)
+
+    def test_export_worker_builds_a_ready_scorm_record_from_the_pinned_revision(self):
+        from prototype.worker import process_export_job
+
+        client = TestClient(self.module.app)
+        email = f"export-worker-{uuid4()}@example.test"
+        registered = client.post("/api/v1/auth/register", json={"email": email, "password": "a-secure-test-password"})
+        self.assertEqual(registered.status_code, 201, registered.text)
+        project = client.post("/api/v1/projects", json={"title": "Worker SCORM", "direction": "lesson"}).json()
+        with self.module.SessionLocal() as db:
+            user = db.scalar(self.module.select(self.module.User).where(self.module.User.email == email))
+            job = self.module.ExportJob(project_id=project["id"], user_id=user.id, input_revision=project["revision"])
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        process_export_job(job_id, runtime_module=self.module)
+
+        with self.module.SessionLocal() as db:
+            completed = db.get(self.module.ExportJob, job_id)
+            self.assertEqual(completed.status, "ready")
+            self.assertIsNotNone(completed.export_record_id)
+            self.assertIsNotNone(completed.finished_at)
+            record = db.get(self.module.ExportRecord, completed.export_record_id)
+            self.assertIsNotNone(record)
+            self.assertTrue(record.filename.endswith("_SCORM2004.zip"))
+            export_id = completed.export_record_id
+
+        download = client.get(f"/api/v1/exports/{export_id}/content")
+        self.assertEqual(download.status_code, 200, download.text)
+        self.assertEqual(download.headers["content-type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(download.content)) as package:
+            self.assertIn("imsmanifest.xml", package.namelist())
+        outsider = TestClient(self.module.app)
+        outsider.post("/api/v1/auth/register", json={"email": f"export-download-outsider-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        self.assertEqual(outsider.get(f"/api/v1/exports/{export_id}/content").status_code, 404)
+
+    def test_export_worker_rejects_a_course_changed_after_queueing(self):
+        from prototype.worker import process_export_job
+
+        client = TestClient(self.module.app)
+        email = f"export-revision-{uuid4()}@example.test"
+        client.post("/api/v1/auth/register", json={"email": email, "password": "a-secure-test-password"})
+        project = client.post("/api/v1/projects", json={"title": "Revision guard", "direction": "lesson"}).json()
+        with self.module.SessionLocal() as db:
+            user = db.scalar(self.module.select(self.module.User).where(self.module.User.email == email))
+            job = self.module.ExportJob(project_id=project["id"], user_id=user.id, input_revision=project["revision"] - 1)
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        process_export_job(job_id, runtime_module=self.module)
+
+        with self.module.SessionLocal() as db:
+            failed = db.get(self.module.ExportJob, job_id)
+            self.assertEqual(failed.status, "failed")
+            self.assertEqual(failed.error_code, "COURSE_REVISION_CHANGED")
+            self.assertNotIn("Revision guard", failed.error_message_safe)
 
 
 if __name__ == "__main__":

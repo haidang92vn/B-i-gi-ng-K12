@@ -21,6 +21,15 @@ không có storage.
 
 ## Kiến trúc
 
+### Bảo vệ bản nháp
+
+Chuyển bước chờ editor lưu thành công; khi lưu lỗi, màn hình hiện tại được giữ để
+giáo viên thử lại. Đóng/tải lại tab có thay đổi chưa lưu sẽ yêu cầu xác nhận của
+trình duyệt. “Bài mới” cần xác nhận xóa bản hiện tại; hãy tải bản sao trước khi
+đồng ý. Lỗi lưu trữ bị chặn/hết dung lượng được báo rõ, không báo lưu thành công
+chỉ vì dữ liệu còn trong bộ nhớ tạm. Cập nhật từ revision cũ bị từ chối để giảm
+nguy cơ ghi đè khi mở nhiều tab (chưa phải cơ chế khóa giao dịch giữa các tab).
+
 ```text
 Trình duyệt
   └─ course.json tạm trong local storage
@@ -107,6 +116,55 @@ Nguồn chính thức:
    URL HTTPS, không được đóng vào ZIP, và giáo viên phải xác nhận quyền sử dụng.
 
 ## Điều không tuyên bố
+
+### Cấu hình player đã áp dụng
+
+Preview và ZIP cùng áp dụng `navigation.show_menu`, `navigation.show_progress` và
+ba chế độ điều hướng: `free` cho phép chọn slide bất kỳ; `sequential` cho phép
+quay lại hoặc đi tới slide kế sau slide xa nhất đã mở; `restricted` chỉ cho phép
+đi tới slide liền trước/liền sau. Ẩn tiến độ chỉ ẩn giao diện, không tắt tracking LMS.
+
+Bố cục `two_column` chuyển thành một cột trên màn hình nhỏ; `callout` có nền/viền
+nhấn, `quiz` có viền phân biệt. Màu nhấn chỉ nhận mã hex hợp lệ. Câu hỏi đã chọn
+vẫn tập trung ở slide cuối. Tiến độ tính theo số slide khác nhau đã mở, không
+coi nhảy tới slide cuối là đã xem cả bài. Resume lưu danh sách slide đã mở và
+vẫn đọc trạng thái cũ chỉ có `highestVisited`.
+
+Player lưu câu trả lời quiz chưa nộp vào `cmi.suspend_data` mỗi khi người học
+thay đổi đáp án. Chuyển khỏi slide quiz rồi quay lại, hoặc LMS mở lại phiên học,
+sẽ khôi phục chọn một, chọn nhiều, đúng/sai, điền từ, ghép đôi, sắp xếp,
+kéo-thả và chọn ảnh. Sau khi nộp, điểm và trạng thái đạt/chưa đạt cũng được dựng
+lại từ trạng thái resume.
+
+Sau khi nộp, từng câu được đánh dấu đúng/chưa đúng và hiển thị phản hồi đúng,
+phản hồi cần cải thiện cùng phần giải thích mà giáo viên đã lưu. “Làm lại quiz”
+xóa đáp án của lượt hiện tại, đưa completion về `incomplete`, success về
+`unknown` và chỉ ghi điểm/trạng thái mới sau lần nộp tiếp theo.
+
+Chính sách quiz thuộc `course.json` 1.1.0: giáo viên cấu hình tối đa 1–10 lượt
+hoặc không giới hạn, ẩn/hiện phản hồi và ẩn/hiện đáp án đúng ở Bước 7. File
+1.0.0 được nâng an toàn theo `docs/COURSE_SCHEMA_MIGRATION_1_1.md`.
+
+Kiểm thử Chromium kiểm tra cả preview sandbox và ZIP cho từng chế độ điều hướng,
+ẩn menu/tiến độ, màu nhấn và bố cục desktop/mobile. Đây là kết quả cục bộ, không
+thay thế kiểm thử trên tenant K12Online thật.
+
+Ở Bước 8 của giao diện local-first, báo cáo chất lượng không chỉ trả số lượng
+cảnh báo: mỗi phát hiện liên kết trực tiếp và tự chọn đúng mục ở Bước 4 (slide),
+Bước 5 (câu hỏi) hoặc Bước 7 (cấu hình LMS). Liên kết này giúp sửa nhanh, nhưng không tự đánh dấu
+nội dung là đã duyệt và không thay thế validator khi export.
+
+### Giới hạn kiểm chứng
+
+Preview trả HTML tự chứa cùng JavaScript dùng trong ZIP, nên iframe sandbox không
+phải tìm runtime/player bằng đường dẫn tương đối. Export vẫn đóng gói các tệp JS
+riêng. Kiểm thử Chromium mở cả preview sandbox và tài nguyên lấy từ ZIP do Python
+thực sự sinh, kiểm tra điều hướng, chấm quiz và escaping nội dung có thẻ script.
+
+Preview/export từ chối bài không có slide, ID slide/câu hỏi/mục tiêu trùng hoặc rỗng,
+liên kết mục tiêu bị thiếu và cấu hình bắt buộc quiz nhưng không chọn câu hỏi.
+Câu hỏi đã chọn phải có đáp án phù hợp với loại tương tác; phương án không được
+trống/trùng, đáp án phải nằm trong lựa chọn và thứ tự phải bao gồm đủ các thẻ.
 
 Validator serverless và LMS mô phỏng chỉ xác nhận cấu trúc, vòng đời API và các
 quy tắc kỹ thuật của project. Mỗi trường vẫn phải upload thử ZIP lên tenant

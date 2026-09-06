@@ -160,28 +160,22 @@ accuracy fields. It does not contain student name, email or source identifier. `
 row_number)` is unique. Migration `20260902_15_learning_analytics.py` creates both tables.
 
 ## export_jobs
+- Created by migration `20260905_17_export_jobs.py`; Redis stores only this row's opaque id.
 - id
 - project_id
 - user_id
-- type: scorm2004
+- job_type: scorm2004
 - status: queued / running / failed / ready
 - input_revision
+- export_record_id nullable; set only after the ZIP and its validation metadata are durable
 - error_code nullable
 - error_message_safe nullable
 - created_at
 - started_at nullable
 - finished_at nullable
 
-## scorm_exports
-- id
-- export_job_id
-- project_id
-- storage_key
-- filename
-- byte_size
-- manifest_version/preset metadata
-- validation_json JSONB
-- created_at
+`export_records` remains the immutable SCORM export history. A completed job points to one
+`export_records` row instead of duplicating a second export metadata table.
 
 ## audit_events
 Start small. Record security-relevant actions such as credential replacement, account changes and export creation without storing secrets.

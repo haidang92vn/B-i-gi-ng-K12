@@ -28,17 +28,19 @@ function read(): LocalWorkspace | null {
 
 function write(workspace: LocalWorkspace) {
   const snapshot = clone(workspace);
-  memoryWorkspace = snapshot;
   try {
-    globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    if (!globalThis.localStorage) throw new Error("Storage unavailable");
+    globalThis.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   } catch {
-    // The in-memory fallback deliberately disappears when this tab is closed.
+    throw new Error("Không thể lưu trên trình duyệt (hết chỗ hoặc bị chặn). Giữ tab này mở, cho phép lưu trữ hoặc giải phóng dung lượng rồi thử lưu lại.");
   }
+  memoryWorkspace = snapshot;
   return snapshot;
 }
 
 function emptyCourse(projectId: string, title: string, direction: WorkflowDirection): CanonicalCourse {
   return {
+    schema_version: "1.1.0",
     id: projectId,
     revision: 1,
     metadata: { title, direction, language: "vi-VN" },
@@ -47,7 +49,7 @@ function emptyCourse(projectId: string, title: string, direction: WorkflowDirect
     question_bank: [],
     theme: { id: "default", primary_color: "#3157d5", font_family: null, logo_asset_id: null },
     navigation: { mode: "free", show_menu: true, show_progress: true },
-    completion: { viewed_percent: 90, passing_score: 70, require_quiz: true },
+    completion: { viewed_percent: 90, passing_score: 70, require_quiz: true, max_attempts: null, show_feedback: true, show_correct_answer: false },
     scorm: { standard: "SCORM_2004", edition: "4th Edition", preset: "k12online", resume: true, track_score: true, track_completion: true, track_success: true },
   };
 }
@@ -67,8 +69,9 @@ export function loadLocalWorkspace(): LocalWorkspace | null {
 }
 
 export function clearLocalWorkspace() {
+  try { globalThis.localStorage?.removeItem(STORAGE_KEY); }
+  catch { throw new Error("Không thể mở bài mới vì trình duyệt đang chặn lưu trữ. Bài hiện tại vẫn được giữ."); }
   memoryWorkspace = null;
-  try { globalThis.localStorage?.removeItem(STORAGE_KEY); } catch { /* noop */ }
 }
 
 export function saveLocalDraft(draft: LocalWorkspace["draft"], project: Project | null) {
@@ -86,6 +89,18 @@ export async function getLocalProject(projectId: string): Promise<Project> {
   return clone(requireProject(projectId).project!);
 }
 
+export async function saveLocalSource(project: Project | null, draft: LocalWorkspace["draft"]): Promise<Project> {
+  if (!project) return createLocalProject(draft.title, draft.direction, draft.sourceText);
+  const current = requireProject(project.id).project!;
+  if (current.revision !== project.revision) throw new Error("Bài đã thay đổi ở phiên khác. Hãy tải lại bản mới nhất trước khi lưu.");
+  const revision = current.revision + 1;
+  const next = { ...current, title: draft.title, revision, course: {
+    ...current.course, revision, metadata: { ...current.course.metadata, title: draft.title, direction: draft.direction },
+  } };
+  // One durable write keeps source, metadata and revision together even when storage is full.
+  return clone(write({ draft, project: next }).project!);
+}
+
 export async function updateLocalProjectTitle(project: Project, title: string): Promise<Project> {
   return updateLocalCanonicalCourse(project, { ...project.course, metadata: { ...project.course.metadata, title } });
 }
@@ -97,6 +112,7 @@ export async function updateLocalProjectDirection(project: Project, direction: W
 export async function updateLocalCanonicalCourse(project: Project, draft: CanonicalCourse): Promise<Project> {
   const workspace = requireProject(project.id);
   const current = workspace.project!;
+  if (current.revision !== project.revision) throw new Error("Bài đã thay đổi ở phiên khác. Hãy giữ nội dung hiện tại và tải lại bản mới nhất.");
   const revision = current.revision + 1;
   const course: CanonicalCourse = {
     ...clone(draft),
@@ -182,7 +198,7 @@ function arrayValue(value: unknown, message: string) {
  */
 export function parseLocalCourseBackup(value: unknown): CanonicalCourse {
   const course = recordValue(value, "gốc phải là một object.");
-  assertBackup(course.schema_version === "1.0.0", "chỉ hỗ trợ schema_version 1.0.0.");
+  assertBackup(course.schema_version === "1.0.0" || course.schema_version === "1.1.0", "chỉ hỗ trợ schema_version 1.0.0 hoặc 1.1.0.");
   stringValue(course.id, "thiếu id.");
   assertBackup(Number.isInteger(course.revision) && Number(course.revision) >= 1, "revision phải là số nguyên dương.");
 
@@ -238,11 +254,16 @@ export function parseLocalCourseBackup(value: unknown): CanonicalCourse {
   assertBackup(Number.isInteger(completion.viewed_percent) && Number(completion.viewed_percent) >= 0 && Number(completion.viewed_percent) <= 100, "completion.viewed_percent không hợp lệ.");
   assertBackup(Number.isInteger(completion.passing_score) && Number(completion.passing_score) >= 0 && Number(completion.passing_score) <= 100, "completion.passing_score không hợp lệ.");
   assertBackup(typeof completion.require_quiz === "boolean", "completion.require_quiz không hợp lệ.");
+  assertBackup(completion.max_attempts === undefined || completion.max_attempts === null || (Number.isInteger(completion.max_attempts) && Number(completion.max_attempts) >= 1 && Number(completion.max_attempts) <= 10), "completion.max_attempts không hợp lệ.");
+  assertBackup(completion.show_feedback === undefined || typeof completion.show_feedback === "boolean", "completion.show_feedback không hợp lệ.");
+  assertBackup(completion.show_correct_answer === undefined || typeof completion.show_correct_answer === "boolean", "completion.show_correct_answer không hợp lệ.");
   const scorm = recordValue(course.scorm, "thiếu scorm.");
   assertBackup(scorm.standard === "SCORM_2004" && ["k12online", "custom"].includes(String(scorm.preset)), "scorm không hợp lệ.");
   assertBackup(["resume", "track_score", "track_completion", "track_success"].every((key) => typeof scorm[key] === "boolean"), "cấu hình SCORM không hợp lệ.");
 
   const normalized = clone(course) as CanonicalCourse;
+  normalized.schema_version = "1.1.0";
+  normalized.completion = { ...normalized.completion!, max_attempts: normalized.completion?.max_attempts ?? null, show_feedback: normalized.completion?.show_feedback ?? true, show_correct_answer: normalized.completion?.show_correct_answer ?? false };
   normalized.question_bank = normalized.question_bank.map((question) => ({ ...question, options: question.options || [], objective_ids: question.objective_ids || [], settings: question.settings || {} }));
   normalized.slides = normalized.slides.map((slide) => ({ ...slide, blocks: slide.blocks.map((block) => ({ ...block, settings: block.settings || {} })) }));
   return normalized;

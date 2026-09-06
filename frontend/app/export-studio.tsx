@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { exportScorm, listExports, runQualityCheck, type ExportRecord, type Project, type QualityReport } from "@/lib/api";
+import { downloadExport, exportScorm, getExportJob, listExports, queueScormExport, runQualityCheck, type ExportJob, type ExportRecord, type Project, type QualityReport } from "@/lib/api";
 import { formatByteSize, formatExportTime, sortQualityFindings } from "@/lib/export";
 
 type Props = {
@@ -26,10 +26,15 @@ export default function ExportStudio({ project, onStatus }: Props) {
   const [history, setHistory] = useState<ExportRecord[]>([]);
   const [checking, setChecking] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [queueing, setQueueing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [backgroundJob, setBackgroundJob] = useState<ExportJob | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [message, setMessage] = useState("");
   const canExport = project.course.slides.length > 0;
   const projectHistory = useMemo(() => history.filter((record) => record.project_id === project.id), [history, project.id]);
+  const backgroundPending = backgroundJob?.status === "queued" || backgroundJob?.status === "running";
+  const busy = checking || exporting || queueing || downloading || backgroundPending;
 
   async function refreshHistory(silent = false) {
     setHistoryLoading(true);
@@ -45,7 +50,28 @@ export default function ExportStudio({ project, onStatus }: Props) {
   }
 
   useEffect(() => { void refreshHistory(); }, [project.id]);
-  useEffect(() => { setReport(null); }, [project.id, project.revision]);
+  useEffect(() => { setReport(null); setBackgroundJob(null); }, [project.id, project.revision]);
+
+  useEffect(() => {
+    if (!backgroundJob || !backgroundPending) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void getExportJob(backgroundJob.id)
+        .then((next) => {
+          if (cancelled) return;
+          setBackgroundJob(next);
+          if (next.status === "ready") onStatus("saved", "ZIP xuất nền đã sẵn sàng để tải về.");
+        })
+        .catch((reason) => {
+          if (cancelled) return;
+          const detail = reason instanceof Error ? reason.message : "Không thể kiểm tra trạng thái xuất SCORM.";
+          setMessage(detail);
+          onStatus("error", detail);
+          setBackgroundJob(null);
+        });
+    }, 2_000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [backgroundJob, backgroundPending, onStatus]);
 
   async function checkQuality() {
     setChecking(true);
@@ -85,15 +111,58 @@ export default function ExportStudio({ project, onStatus }: Props) {
     }
   }
 
+  async function createBackgroundExport() {
+    if (!canExport) return;
+    setQueueing(true);
+    setMessage("");
+    onStatus("loading", "Đang đưa bản course.json đã lưu vào hàng đợi xuất SCORM…");
+    try {
+      const job = await queueScormExport(project.id);
+      setBackgroundJob(job);
+      onStatus("loading", "Bản xuất nền đang chờ worker xử lý.");
+    } catch (reason) {
+      const detail = reason instanceof Error ? reason.message : "Không thể đưa yêu cầu xuất SCORM vào hàng đợi.";
+      setMessage(detail);
+      onStatus("error", detail);
+    } finally {
+      setQueueing(false);
+    }
+  }
+
+  async function downloadBackgroundExport() {
+    if (!backgroundJob?.export_id) return;
+    setDownloading(true);
+    setMessage("");
+    try {
+      const result = await downloadExport(backgroundJob.export_id);
+      download(result.blob, result.filename);
+      await refreshHistory(true);
+      onStatus("saved", `Đã tải ${result.filename}`);
+    } catch (reason) {
+      const detail = reason instanceof Error ? reason.message : "Không thể tải ZIP SCORM đã xuất.";
+      setMessage(detail);
+      onStatus("error", detail);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="export-studio">
       <section className="export-hero">
         <div><span>SCORM 2004 • SERVER-SIDE</span><h3>Kiểm tra, đóng gói và tải bài giảng</h3><p>ZIP chỉ được trả về sau khi backend xác thực manifest, runtime, tệp gốc, media và chính sách cấu hình đã lưu trong <code>course.json</code>.</p></div>
-        <div className="export-actions"><button type="button" onClick={() => { void checkQuality(); }} disabled={checking || exporting}>{checking ? "Đang kiểm tra…" : "Kiểm tra chất lượng"}</button><button type="button" className="primary" onClick={() => { void createExport(); }} disabled={!canExport || checking || exporting}>{exporting ? "Đang đóng gói…" : "Tải ZIP SCORM"}</button></div>
+        <div className="export-actions"><button type="button" onClick={() => { void checkQuality(); }} disabled={busy}>{checking ? "Đang kiểm tra…" : "Kiểm tra chất lượng"}</button><button type="button" onClick={() => { void createBackgroundExport(); }} disabled={!canExport || busy}>{queueing ? "Đang xếp hàng…" : backgroundPending ? "Worker đang xuất…" : "Xuất nền (gói lớn)"}</button><button type="button" className="primary" onClick={() => { void createExport(); }} disabled={!canExport || busy}>{exporting ? "Đang đóng gói…" : "Tải ZIP SCORM"}</button></div>
       </section>
 
       {!canExport && <p className="export-message error">Cần có ít nhất một slide đã lưu trước khi xuất SCORM.</p>}
       {message && <p className="export-message error" role="alert">{message}</p>}
+
+      {backgroundJob && <section className="quality-report" aria-live="polite">
+        <strong>{backgroundJob.status === "queued" ? "Yêu cầu xuất nền đang chờ worker" : backgroundJob.status === "running" ? "Worker đang kiểm tra và đóng gói ZIP" : backgroundJob.status === "ready" ? "ZIP xuất nền đã sẵn sàng" : "Xuất nền chưa hoàn thành"}</strong>
+        <p>Bản {backgroundJob.input_revision} • mã yêu cầu {backgroundJob.id.slice(0, 8)}. Worker luôn xuất từ <code>course.json</code> đúng tại thời điểm yêu cầu được tạo.</p>
+        {backgroundJob.status === "ready" && backgroundJob.export_id && <button type="button" className="primary" disabled={downloading} onClick={() => { void downloadBackgroundExport(); }}>{downloading ? "Đang tải…" : "Tải ZIP xuất nền"}</button>}
+        {backgroundJob.status === "failed" && <p className="export-message error" role="alert">{backgroundJob.error_message || "Không thể xuất ZIP SCORM. Hãy thử lại."}</p>}
+      </section>}
 
       <section className="export-gates" aria-label="Các lớp kiểm tra xuất bản">
         <div><b>01</b><span><strong>Chất lượng nội dung</strong><small>Khuyến nghị để giáo viên rà soát; không tự chặn xuất bản.</small></span></div>
@@ -118,7 +187,7 @@ export default function ExportStudio({ project, onStatus }: Props) {
       </section>}
 
       <section className="export-history">
-        <div className="export-history-head"><div><span>LỊCH SỬ CỦA BÀI NÀY</span><h3>Các ZIP đã được validator chấp nhận</h3></div><button type="button" onClick={() => { void refreshHistory(); }} disabled={historyLoading || exporting}>{historyLoading ? "Đang tải…" : "Làm mới"}</button></div>
+        <div className="export-history-head"><div><span>LỊCH SỬ CỦA BÀI NÀY</span><h3>Các ZIP đã được validator chấp nhận</h3></div><button type="button" onClick={() => { void refreshHistory(); }} disabled={historyLoading || busy}>{historyLoading ? "Đang tải…" : "Làm mới"}</button></div>
         {historyLoading ? <p className="history-empty">Đang tải lịch sử…</p> : projectHistory.length ? <div className="history-list">{projectHistory.map((record) => <article key={record.id}><span className={record.status === "ready" ? "ready" : "pending"}>{record.status === "ready" ? "Sẵn sàng" : record.status}</span><div><strong>{record.filename}</strong><small>{formatExportTime(record.created_at)} • {formatByteSize(record.byte_size)} • mã {record.id.slice(0, 8)}</small></div></article>)}</div> : <p className="history-empty">Chưa có ZIP nào cho bài giảng này. ZIP thành công sẽ được lưu metadata trong lịch sử và bản tải được gửi ngay cho anh.</p>}
       </section>
 

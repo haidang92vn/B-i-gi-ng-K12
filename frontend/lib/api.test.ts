@@ -5,13 +5,16 @@ import {
   attachProjectMedia,
   createProject,
   currentTeacher,
+  downloadExport,
   exportScorm,
   filenameFromContentDisposition,
+  getExportJob,
   generateSlideTTS,
   generateCourse,
   getProject,
   listExports,
   populateProjectFromGeneration,
+  queueScormExport,
   regenerateProjectSlide,
   runQualityCheck,
   updateCanonicalCourse,
@@ -244,6 +247,31 @@ describe("Canonical project API", () => {
 
     await expect(listExports()).resolves.toEqual(records);
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/exports", { credentials: "include" });
+  });
+
+  it("queues only the project id and polls a safe background export state", async () => {
+    const job = { id: "job-1", project_id: project.id, input_revision: 3, status: "queued", export_id: null, error_code: null, error_message: null, created_at: null, started_at: null, finished_at: null };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(job), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...job, status: "ready", export_id: "export-1" }), { status: 200 }));
+
+    await expect(queueScormExport(project.id)).resolves.toEqual(job);
+    await expect(getExportJob("job-1")).resolves.toMatchObject({ status: "ready", export_id: "export-1" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/projects/course-1/exports/scorm2004/jobs", { method: "POST", credentials: "include" });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/export-jobs/job-1", { credentials: "include" });
+  });
+
+  it("downloads a completed background export through a private API route", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Blob(["zip"]), {
+      status: 200,
+      headers: { "Content-Disposition": "attachment; filename=queued_SCORM2004.zip" },
+    }));
+
+    const result = await downloadExport("export/id");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/exports/export%2Fid/content", { credentials: "include" });
+    expect(result.filename).toBe("queued_SCORM2004.zip");
   });
 
   it("uses a safe fallback filename for incomplete response headers", () => {

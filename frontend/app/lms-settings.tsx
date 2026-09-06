@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getProject, updateCanonicalCourse, type NavigationMode, type Project, type ScormPreset } from "@/lib/api";
+import { type NavigationMode, type Project, type ScormPreset } from "@/lib/api";
+import { getLocalProject as getProject, updateLocalCanonicalCourse as updateCanonicalCourse } from "@/lib/local-workspace";
 import { applyLmsSettings, k12OnlinePreset, lmsWarnings, settingsFromCourse, type LmsSettings } from "@/lib/scorm";
 
 type SaveTone = "idle" | "loading" | "saved" | "error";
 
 type Props = {
   project: Project;
+  localOnly?: boolean;
   onProjectChange: (project: Project) => void;
   onSaveState: (tone: SaveTone, message: string, saved: boolean) => void;
 };
@@ -27,7 +29,7 @@ function boundedPercent(value: string, fallback: number) {
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : fallback;
 }
 
-export default function LmsSettingsEditor({ project, onProjectChange, onSaveState }: Props) {
+export default function LmsSettingsEditor({ project, localOnly = false, onProjectChange, onSaveState }: Props) {
   const canEdit = project.access_level !== "viewer";
   const [settings, setSettings] = useState<LmsSettings>(() => settingsFromCourse(project.course));
   const [serverProject, setServerProject] = useState(project);
@@ -162,6 +164,9 @@ export default function LmsSettingsEditor({ project, onProjectChange, onSaveStat
           <label className="percent-field"><span><strong>Điểm đạt</strong><small>Để gửi success = passed</small></span><input type="number" min={0} max={100} disabled={!canEdit} value={settings.completion.passing_score} onChange={(event) => change((draft) => { draft.completion.passing_score = boundedPercent(event.target.value, draft.completion.passing_score); })} /><b>%</b></label>
           <div className="percent-meter score"><i style={{ width: `${settings.completion.passing_score}%` }} /></div>
           <label className="setting-switch"><span><strong>Yêu cầu nộp quiz</strong><small>Không đánh dấu hoàn thành chỉ bằng việc xem slide.</small></span><input type="checkbox" disabled={!canEdit} checked={settings.completion.require_quiz} onChange={(event) => change((draft) => { draft.completion.require_quiz = event.target.checked; })} /></label>
+          {localOnly && <><label className="attempt-field"><span><strong>Số lượt làm quiz</strong><small>Giới hạn từ 1–10, hoặc cho phép không giới hạn.</small></span><select disabled={!canEdit} value={settings.completion.max_attempts ?? 0} onChange={(event) => change((draft) => { const value = Number(event.target.value); draft.completion.max_attempts = value === 0 ? null : value; })}><option value={0}>Không giới hạn</option>{Array.from({ length: 10 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} lượt</option>)}</select></label>
+          <label className="setting-switch"><span><strong>Hiện phản hồi sau khi nộp</strong><small>Đánh dấu từng câu và hiện phản hồi/lời giải thích đã biên soạn.</small></span><input type="checkbox" disabled={!canEdit} checked={settings.completion.show_feedback} onChange={(event) => change((draft) => { draft.completion.show_feedback = event.target.checked; })} /></label>
+          <label className="setting-switch"><span><strong>Hiện đáp án đúng</strong><small>Chỉ hiện sau khi người học nộp bài.</small></span><input type="checkbox" disabled={!canEdit || !settings.completion.show_feedback} checked={settings.completion.show_correct_answer} onChange={(event) => change((draft) => { draft.completion.show_correct_answer = event.target.checked; })} /></label></>}
         </section>
 
         <section className="lms-card tracking-card">
@@ -181,8 +186,7 @@ export default function LmsSettingsEditor({ project, onProjectChange, onSaveStat
 
       <section className="lms-preview">
         <div><span>PLAYER SAU CẤU HÌNH</span><strong>Xem hiệu lực của menu, tiến độ và điều hướng</strong><small>Player tự tải lại sau khi máy chủ xác nhận revision mới.</small></div>
-        <a href={playerUrl} target="_blank" rel="noopener noreferrer">Mở player ↗</a>
-        <iframe key={serverProject.revision} src={playerUrl} title={`Player cấu hình LMS của ${project.title}`} />
+        {localOnly ? <p>Player SCORM sẽ được dựng tạm bởi API serverless ở bước kết nối tiếp theo; cấu hình vẫn đã được lưu trong course.json trên thiết bị này.</p> : <><a href={playerUrl} target="_blank" rel="noopener noreferrer">Mở player ↗</a><iframe key={serverProject.revision} src={playerUrl} title={`Player cấu hình LMS của ${project.title}`} /></>}
       </section>
 
       <div className="compatibility-note"><strong>Chưa phải xác nhận tương thích K12Online thực tế.</strong><p>Validator tự động chỉ kiểm tra cấu trúc và runtime. Sau khi xuất ở Bước 8 vẫn phải upload vào tenant K12Online thật để kiểm tra launch, resume, completion, success, điểm và session time.</p></div>

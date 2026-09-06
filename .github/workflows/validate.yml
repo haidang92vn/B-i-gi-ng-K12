@@ -31,3 +31,41 @@ jobs:
 
       - name: Compile Python sources
         run: python -m compileall -q prototype tests validate_bundle.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python for generated player integration tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install renderer dependencies
+        run: pip install -r serverless/requirements.txt
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Install browser for end-to-end tests
+        run: pnpm --dir frontend exec playwright install --with-deps chromium
+
+      - name: Check frontend
+        run: pnpm --dir frontend typecheck && pnpm --dir frontend test
+
+      - name: Run local-first and SCORM runtime end-to-end tests
+        run: pnpm --dir frontend test:e2e

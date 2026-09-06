@@ -134,6 +134,7 @@ Acceptance:
 - [x] log redaction.
 - [x] basic monitoring.
 - [x] restore drill documentation.
+- [x] Redis-backed, revision-pinned SCORM export jobs with durable status, private ZIP download and safe failure reporting.
 
 ## Milestone 12 — Quality & advanced features [P1/P2]
 - [x] AI quality checker.
@@ -185,3 +186,37 @@ Acceptance for this first slice:
 - unauthenticated `/api/v1/me` reaches FastAPI through the frontend proxy and returns `401`;
 - the FastAPI prototype and existing automated suite remain functional;
 - no credential is stored in browser JavaScript or committed configuration.
+
+## Milestone 14 — Stateless serverless authoring mode [P1]
+
+- [x] Render self-contained sandbox previews and reject empty/invalid quiz exports; verify generated preview and actual ZIP assets in Chromium.
+
+- [x] Protect local drafts with save-aware navigation, replacement confirmation, truthful storage errors and stale-revision rejection.
+
+- [x] Extract DB-independent FastAPI generation, preview, quality and SCORM export core.
+- [x] Validate a complete `course.json` on every serverless request.
+- [x] Add local-first browser persistence for the existing 8-step workflow.
+- [x] Export/import a validated `course.json` backup without server-side storage.
+- [x] Add browser regression tests for Mock authoring, quality, ZIP download and backup restore.
+- [x] Run the packaged SCORM 2004 runtime against a simulated LMS API; verify lifecycle, resume data and session time without claiming tenant compatibility.
+- [x] Support and test matching, ordering, drag-drop and HTTPS image-choice interactions in the serverless SCORM player; reject incomplete interaction configuration before export.
+- [x] Apply navigation/menu/progress settings and responsive layouts consistently in generated preview and ZIP; count distinct visited slides for completion and retain resume compatibility.
+- [x] Surface serverless quality findings in local-first Step 8 and route each finding to its exact slide/question or owning LMS step.
+- [x] Persist and restore in-progress answers and submitted quiz feedback through SCORM 2004 suspend data.
+- [x] Show per-question feedback/explanations after submission and support a clean SCORM-aware quiz retry.
+- [x] Add schema-versioned teacher controls for quiz attempt limits and feedback/correct-answer disclosure.
+- [x] Bound SCORM 2004 suspend data below 60,000 characters, preserve core progress when compacting oversized quiz drafts, and warn when resume data is partial or rejected.
+- [x] Report per-question SCORM 2004 interactions for every quiz attempt without making core score/completion depend on LMS analytics support.
+- [ ] Keep AI credentials only in Vercel Environment Variables; never in the browser.
+- [x] Enforce a 4 MB ZIP guard and disable large source/media/TTS workflows.
+- [x] Deploy an isolated FastAPI Vercel project and proxy the frontend to it.
+- [x] Run Mock AI → review → SCORM ZIP end-to-end on the public URL.
+- [x] Keep a production-only browser smoke test for create → preview → quality → ZIP, disabled unless `PRODUCTION_BASE_URL` is explicitly supplied.
+
+Acceptance:
+- a teacher can create, review and download a small SCORM ZIP without a VPS,
+  PostgreSQL, Redis or R2;
+- browser deletion removes the local draft and no project/history data is retained server-side;
+- server rejects invalid `course.json` and oversized responses before download;
+- ChatGPT/Gemini secrets remain server-only;
+- SCORM validator and manual K12Online test disclaimer remain visible.

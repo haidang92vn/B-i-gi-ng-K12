@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -82,6 +82,9 @@ class Completion(StrictModel):
     viewed_percent: int = Field(ge=0, le=100)
     passing_score: int = Field(ge=0, le=100)
     require_quiz: bool
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    show_feedback: bool = True
+    show_correct_answer: bool = False
 
 
 class Scorm(StrictModel):
@@ -95,7 +98,7 @@ class Scorm(StrictModel):
 
 
 class Course(StrictModel):
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "1.1.0"] = "1.1.0"
     id: str
     revision: int = Field(ge=1)
     metadata: Metadata
@@ -106,6 +109,11 @@ class Course(StrictModel):
     navigation: Navigation
     completion: Completion
     scorm: Scorm
+
+    @model_validator(mode="after")
+    def migrate_schema(self):
+        self.schema_version = "1.1.0"
+        return self
 
 
 def new_course(title: str, direction: Literal["lesson", "review", "advanced"] = "lesson") -> Course:

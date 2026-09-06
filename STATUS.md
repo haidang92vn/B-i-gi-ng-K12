@@ -7,6 +7,48 @@ contracts for the production architecture. It is **not yet the complete producti
 
 ### Available now
 
+- Canonical schema 1.1.0 adds backward-compatible quiz attempt and disclosure policy. The
+  local-first LMS editor controls 1–10/unlimited attempts, per-question feedback and correct-answer
+  disclosure; old 1.0.0 courses migrate to documented safe defaults.
+
+- Submitted quizzes show per-question correct/incorrect feedback and teacher-authored
+  explanations. Learners can start a clean retry; required-quiz completion and success return
+  to incomplete/unknown until the next submission.
+
+- The serverless SCORM player persists in-progress answers for every supported quiz type in
+  `cmi.suspend_data`, restores them after slide navigation/LMS resume, and restores submitted
+  score feedback without marking an unfinished quiz complete.
+
+- Suspend data uses a conservative 60,000-character budget below the SCORM 2004 SPM. Oversized
+  drafts retain core progress, score and attempt state, compress visited-slide ranges, and visibly
+  warn when some answers are omitted or the LMS rejects the save.
+
+- Quiz submissions append SCORM 2004 `cmi.interactions.n` records per question and attempt,
+  including type, timestamp, learner response, result and latency. Unsupported interaction
+  reporting degrades safely without blocking score, completion or success tracking.
+
+- Local-first Step 8 shows every serverless quality finding with its explanation,
+  recommendation and a direct link that selects the exact affected slide or question, or opens the LMS setting step.
+  The report remains advisory; server-side validation is still required before SCORM export.
+
+- Serverless preview and ZIP honor menu/progress visibility, free/sequential/restricted
+  navigation, responsive two-column/callout layouts and safe theme accents. Progress counts
+  distinct visited slides instead of the furthest slide. Verification: 54 Python tests,
+  21 Chromium tests, 37 frontend unit tests and TypeScript checks pass locally. The serverless API
+  and frontend were deployed to their production aliases on 2026-09-06, followed by a successful
+  public Mock AI → preview → quality check → SCORM ZIP smoke test.
+
+- Repository validation supports both the legacy single-version `const` contract and the current
+  ordered `schema_version` migration `enum`; the example course must use the newest listed version.
+
+- Serverless preview embeds packaged runtime/player scripts for sandbox operation. Export and
+  preview reject empty slide lists and invalid selected quiz configurations; generated HTML and
+  ZIP assets are exercised in Chromium, including script-text escaping and scoring.
+
+- Local draft protection: navigation waits for editor saves, replacement requires confirmation,
+  storage failures remain visible with retry, and source/metadata save atomically in one browser
+  write. TypeScript, 36 frontend unit tests and browser regression scenarios cover this slice.
+
 - 8-step UX prototype.
 - Mock AI generation flow.
 - Editable lesson review flow.
@@ -28,7 +70,7 @@ contracts for the production architecture. It is **not yet the complete producti
 - HTML5 player preview renders directly from the canonical project through the same renderer used by SCORM export. It includes progress, menu, fullscreen, responsive layouts, navigation restrictions and escaping for both HTML text and JSON embedded in scripts.
 - SCORM runtime tracks location, suspend data, progress, score, completion, success and session time. A fake `API_1484_11` harness verifies resume and the independence of completion/success without an LMS.
 - SCORM export validates manifest, root files, launch resource, runtime and configuration before packaging. Ready packages are stored in R2-compatible storage with per-teacher export metadata; manual K12Online/SCORM Cloud verification uses `docs/LMS_COMPATIBILITY_TEST.md`.
-- Production deployment artifacts include a Caddy HTTPS reverse proxy, FastAPI API, Redis, PostgreSQL, an explicit Alembic migration job, a reserved Redis worker and a daily encrypted PostgreSQL backup service to a separate R2 bucket. Liveness/readiness endpoints, structured secret-redacted logs, monitoring guidance and a quarterly restore drill are documented in `docs/DEPLOYMENT.md` and `docs/RESTORE_DRILL.md`.
+- Production deployment artifacts include a Caddy HTTPS reverse proxy, FastAPI API, Redis, PostgreSQL, an explicit Alembic migration job, a Redis worker for durable SCORM export jobs and a daily encrypted PostgreSQL backup service to a separate R2 bucket. Liveness/readiness endpoints, structured secret-redacted logs, monitoring guidance and a quarterly restore drill are documented in `docs/DEPLOYMENT.md` and `docs/RESTORE_DRILL.md`.
 - The export step includes a deterministic, non-blocking quality check over canonical course data. It flags AI-draft slides, text density, question stem/options/answer structure, duplicates, zero-score quiz questions and missing objective links without calling an AI provider or replacing the SCORM technical gate.
 - School teams support explicit school administrators and teacher members. Project owners can share a lesson only with a registered teacher in a common school, as `viewer` or `editor`; the prototype UI locks viewer editing while retaining player, quality-check and SCORM-export access.
 - The school shared-question library keeps subject, grade, topic, learning objectives, answer, difficulty and reviewer attribution. Teachers submit a draft from an edited course question; school admins publish or reject it, and only published copies can be added back into a project.
@@ -60,15 +102,18 @@ contracts for the production architecture. It is **not yet the complete producti
   the K12Online/custom preset, navigation, completion and independent score/completion/success
   tracking switches, then refreshes the canonical player. Step 8 displays the deterministic
   quality report, asks FastAPI to validate/package the saved canonical project, downloads only a
-  successful ZIP and shows the project's ready-export metadata. See `docs/FRONTEND_MIGRATION.md`.
+  successful ZIP and shows the project's ready-export metadata. For long-running exports it can
+  queue a revision-pinned worker job and later download its private completed ZIP. See
+  `docs/FRONTEND_MIGRATION.md`.
 
 ### Not implemented yet
 
 - Production PostgreSQL project library (the local prototype uses SQLite; deployment must run the Alembic migration against PostgreSQL).
 - Full SCORM conformance validation and verified K12Online interoperability matrix.
 - Production deployment cutover from the FastAPI-served prototype UI to the complete Next.js
-  frontend, plus actual background-job handlers (the current Compose worker only validates Redis
-  connectivity).
+  frontend. The Compose worker now handles revision-pinned SCORM export jobs, exposes a
+  private post-worker ZIP download and is surfaced as an optional Step 8 “Xuất nền” path;
+  AI/media jobs still need their own bounded queue contracts and cost controls.
 - A real de-identified K12Online export/field dictionary, school retention approval and any official API/webhook specification. The generic report-import prototype must be mapped and accepted before live use; see `docs/ANALYTICS.md`.
 - Execution of the controlled Trường Tiểu học Trần Quốc Toản production runbook by the approved VPS operator and school administrator; see `docs/ONBOARDING_TRAN_QUOC_TOAN.md`.
 

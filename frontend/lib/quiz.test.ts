@@ -19,6 +19,7 @@ describe("Quiz authoring helpers", () => {
     const options = parseImageOptions("img-1 | asset-1 | Tam giác\nimg-2 | asset-2 | Hình vuông");
     expect(options).toEqual([{ id: "img-1", asset_id: "asset-1", label: "Tam giác" }, { id: "img-2", asset_id: "asset-2", label: "Hình vuông" }]);
     expect(imageOptionsToEditorText({ image_options: options })).toContain("asset-2");
+    expect(parseImageOptions("img-3 | https://cdn.example.org/triangle.png | Tam giác")).toEqual([{ id: "img-3", src: "https://cdn.example.org/triangle.png", label: "Tam giác" }]);
   });
 
   it("reports actionable authoring warnings", () => {

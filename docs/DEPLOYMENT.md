@@ -52,7 +52,7 @@ database, does not log a password, and is idempotent without resetting an existi
 Caddy obtains and renews certificates automatically after DNS and ports are correct. It is the
 only container with host ports. PostgreSQL and Redis have no host-published ports; API and worker
 retain outbound access only for R2 and the approved AI providers. `/healthz` is a liveness endpoint; `/readyz` additionally verifies
-PostgreSQL and the configured R2 bucket. Compose health checks use `/readyz` and `pg_isready`.
+PostgreSQL, the configured R2 bucket and Redis in production. Compose health checks use `/readyz` and `pg_isready`.
 
 For basic monitoring, configure an external monitor (Cloudflare health check, Uptime Kuma, or
 equivalent) to alert on a failed `https://YOUR_DOMAIN/healthz`, and review a failed `/readyz`
@@ -76,6 +76,8 @@ required quarterly restore drill are in [RESTORE_DRILL.md](RESTORE_DRILL.md).
 ## Scale path
 
 Phase 1 is this single VPS. Move PostgreSQL/Redis to managed services before adding API/worker
-replicas, and keep R2 as the durable object boundary. Background job producers are not implemented
-yet; the worker container currently proves Redis connectivity and is reserved for the later queue
-implementation rather than silently processing or discarding jobs.
+replicas, and keep R2 as the durable object boundary. The worker now processes revision-pinned
+SCORM export jobs: Redis receives an opaque job id only, PostgreSQL keeps the durable status and
+R2 keeps the completed ZIP. On startup, jobs left in `running` for over 15 minutes are returned to
+the queue. AI generation and media creation remain request-bound until they receive their own
+bounded job types, retry policy and teacher-visible cost controls.

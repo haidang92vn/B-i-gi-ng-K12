@@ -74,3 +74,17 @@ and packaged assets omitted from the manifest.
 
 ## Compatibility policy
 Do not claim full K12Online compatibility solely from static package checks. Maintain a manual test matrix against a real K12Online course and optionally SCORM Cloud after runtime changes.
+
+## Serverless simulated-LMS scope
+
+The stateless exporter runs its packaged `runtime.js` and `player.js` against a
+simulated SCORM 2004 API in Chromium. That regression test covers API discovery,
+initialize, resume data, location, commit, session time, terminate, and scoring
+for `single`, `truefalse`, `multiple`, `fill`, `matching`, `ordering`,
+`dragdrop` and `image` questions.
+
+In serverless mode, image choices must use HTTPS URLs and a teacher rights
+confirmation; uploaded assets are intentionally rejected because no media is
+stored or copied into the ZIP. The simulator is not a K12Online certification:
+the school must still test external-image policy and every interaction in its
+real LMS tenant.

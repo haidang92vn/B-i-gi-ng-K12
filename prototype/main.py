@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 from prototype.course_models import Block, Course, Question, Slide, new_course
 from prototype.auth import COOKIE_NAME, current_session, new_session, normalise_email, password_hasher, set_session_cookie
 from prototype.credentials import decrypt, encrypt
-from prototype.persistence import AICredential, AnalyticsImport, AuthSession, ExportRecord, GenerationRun, LearningAnalytics, MediaAsset, OAuthIdentity, Project, ProjectShare, School, SchoolMembership, SharedQuestion, SourceMaterial, User, create_schema, make_session_factory
+from prototype.persistence import AICredential, AnalyticsImport, AuthSession, ExportJob, ExportRecord, GenerationRun, LearningAnalytics, MediaAsset, OAuthIdentity, Project, ProjectShare, School, SchoolMembership, SharedQuestion, SourceMaterial, User, create_schema, make_session_factory
+from prototype.jobs import QueueUnavailable, client_from_env, enqueue_export_job
 from prototype.analytics import AnalyticsImportError, aggregate_events, aggregate_insights, normalize_rows, parse_report
 from prototype.google_oauth import GOOGLE_ATTEMPT_COOKIE, GOOGLE_ATTEMPT_MAX_AGE, GoogleOAuthError, authorization_url, config_from_env, decode_attempt, encode_attempt, exchange_code, new_attempt
 from prototype.providers import ProviderError, ProviderResult, media_provider_for, provider_for
@@ -66,6 +67,17 @@ def readyz(db: Session = Depends(get_db)):
         dependencies["object_storage"] = storage.healthcheck()
     except Exception:
         dependencies["object_storage"] = "unavailable"
+    if os.getenv("APP_ENV", "development").lower() in {"production", "prod"}:
+        queue_client = None
+        try:
+            queue_client = client_from_env()
+            queue_client.ping()
+            dependencies["redis"] = "ok"
+        except Exception:
+            dependencies["redis"] = "unavailable"
+        finally:
+            if queue_client is not None:
+                queue_client.close()
     if "unavailable" in dependencies.values():
         raise HTTPException(status_code=503, detail={"status": "not_ready", "dependencies": dependencies})
     return {"status": "ok", "dependencies": dependencies}
@@ -930,6 +942,34 @@ class ExportRequest(BaseModel):
     track_success: bool = True
     project_id: str | None = None
     media_by_id: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
+class ExportJobResponse(BaseModel):
+    id: str
+    project_id: str
+    input_revision: int
+    status: Literal["queued", "running", "failed", "ready"]
+    export_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+def serialize_export_job(job: ExportJob) -> ExportJobResponse:
+    return ExportJobResponse(
+        id=job.id,
+        project_id=job.project_id,
+        input_revision=job.input_revision,
+        status=job.status,  # type: ignore[arg-type]
+        export_id=job.export_record_id,
+        error_code=job.error_code,
+        error_message=job.error_message_safe,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+    )
 
 def compact_sentences(text: str):
     text = re.sub(r"\s+", " ", text or "").strip()
@@ -1980,6 +2020,46 @@ window.addEventListener("load",()=>{{
 </body>
 </html>'''
 
+@app.post(
+    "/api/v1/projects/{project_id}/exports/scorm2004/jobs",
+    response_model=ExportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def queue_scorm_export(project_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    """Queue a revision-pinned export without placing course data in Redis.
+
+    Readers retain the same export permission as the synchronous endpoint.  The job records
+    their own user id so only the requesting teacher can later read its status.
+    """
+    project, _ = project_with_access(db, project_id, user)
+    job = ExportJob(project_id=project.id, user_id=user.id, input_revision=project.revision)
+    db.add(job)
+    db.flush()
+    job_id = job.id
+    db.commit()
+    try:
+        enqueue_export_job(job_id)
+    except QueueUnavailable as exc:
+        job = db.get(ExportJob, job_id)
+        if job is not None:
+            job.status = "failed"
+            job.error_code = "EXPORT_QUEUE_UNAVAILABLE"
+            job.error_message_safe = "Hàng đợi xuất SCORM hiện chưa sẵn sàng. Hãy thử lại sau."
+            job.finished_at = datetime.now(timezone.utc)
+            db.commit()
+        raise HTTPException(status_code=503, detail={"code": "EXPORT_QUEUE_UNAVAILABLE", "message": "Hàng đợi xuất SCORM hiện chưa sẵn sàng. Hãy thử lại sau."}) from exc
+    job = db.get(ExportJob, job_id)
+    return serialize_export_job(job)
+
+
+@app.get("/api/v1/export-jobs/{job_id}", response_model=ExportJobResponse)
+def get_export_job(job_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    job = db.scalar(select(ExportJob).where(ExportJob.id == job_id, ExportJob.user_id == user.id))
+    if job is None:
+        raise HTTPException(status_code=404, detail="Export job not found.")
+    return serialize_export_job(job)
+
+
 @app.post("/api/export-scorm")
 def export_scorm(req: ExportRequest, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
     effective = req
@@ -2044,6 +2124,30 @@ def export_scorm(req: ExportRequest, user: User = Depends(current_teacher), db: 
 @app.get("/api/v1/exports")
 def list_exports(user: User = Depends(current_teacher), db: Session = Depends(get_db)):
     return [{"id": item.id, "project_id": item.project_id, "filename": item.filename, "byte_size": item.byte_size, "status": item.status, "created_at": item.created_at} for item in db.scalars(select(ExportRecord).where(ExportRecord.user_id == user.id).order_by(ExportRecord.created_at.desc())).all()]
+
+
+@app.get("/api/v1/exports/{export_id}/content")
+def download_export(export_id: str, user: User = Depends(current_teacher), db: Session = Depends(get_db)):
+    """Download one private, successfully packaged SCORM export.
+
+    Background workers store ZIP bytes through the same export-record boundary as the
+    direct endpoint.  Returning bytes only after ownership and ready-state checks keeps
+    object-store keys private and makes a completed job usable by the teacher.
+    """
+    record = db.scalar(select(ExportRecord).where(ExportRecord.id == export_id, ExportRecord.user_id == user.id))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Export not found.")
+    if record.status != "ready":
+        raise HTTPException(status_code=409, detail="Export is not ready for download.")
+    try:
+        package = storage.get(record.storage_key)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="Export file is unavailable.") from exc
+    return StreamingResponse(
+        io.BytesIO(package),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{record.filename}"'},
+    )
 
 
 @app.get("/api/v1/projects/{project_id}/player", response_class=HTMLResponse)

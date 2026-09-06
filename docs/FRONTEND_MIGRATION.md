@@ -26,7 +26,7 @@ Included now:
 - explicit media attachment that stores only an `asset_id` reference in the canonical slide;
 - Step 7 K12Online/custom preset, navigation, completion and SCORM tracking configuration;
 - a live player refresh after canonical LMS settings are acknowledged by the backend;
-- Step 8 deterministic quality guidance, backend SCORM technical validation, immediate ZIP download and per-project export metadata history;
+- Step 8 deterministic quality guidance, backend SCORM technical validation, immediate or worker-backed ZIP download and per-project export metadata history;
 - a same-origin `/api/*` rewrite to FastAPI.
 
 The browser never receives stored teacher AI credentials. `course.json` remains canonical and no
@@ -125,13 +125,16 @@ shows non-blocking logic warnings and the manual tenant-test disclaimer; static 
 presented as proof of K12Online interoperability.
 
 Step 8 requests the deterministic quality report only for the saved project and displays warnings
-and suggestions without changing `course.json`. Export sends the project identifier through the
-current adapter; FastAPI reconstructs the package exclusively from saved canonical data, validates
-the manifest/runtime/root files/media and completed ZIP, then records a ready export before
-returning the download. The browser never persists generated HTML or a ZIP object. The history is
-metadata only; it is filtered to the current project and does not expose arbitrary object-storage
-URLs. A successful technical check is still not presented as proof of K12Online interoperability:
-the teacher must use the manual tenant checklist before teaching with the package.
+and suggestions without changing `course.json`. Direct export sends the project identifier through
+the current adapter; FastAPI reconstructs the package exclusively from saved canonical data,
+validates the manifest/runtime/root files/media and completed ZIP, then records a ready export
+before returning the download. The optional background path creates a revision-pinned job, polls
+only its teacher-visible safe status and downloads the completed ZIP through an authenticated
+content route; object-storage keys and URLs never reach the browser. The browser never persists
+generated HTML or a ZIP object. The history is metadata only; it is filtered to the current
+project. A successful technical check is still not presented as proof of K12Online
+interoperability: the teacher must use the manual tenant checklist before teaching with the
+package.
 
 All eight teacher workflow screens now have a tested Next.js replacement. The FastAPI prototype
 continues to own domain rules, persistence, rendering and SCORM packaging while the deployment

@@ -74,7 +74,7 @@ Use Redis-backed jobs for work that may take longer than a normal request:
 - AI storyboard generation
 - large quiz generation
 - TTS/media processing
-- SCORM packaging
+- SCORM packaging (implemented with revision-pinned `export_jobs`)
 - quality analysis
 
 ## 4. Persistence
@@ -126,12 +126,14 @@ Every course model carries:
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "revision": 12
 }
 ```
 
-A project edit should update revision. Major schema changes require explicit migrators.
+A project edit should update revision. Major schema changes require explicit migrators. Version
+`1.1.0` adds the quiz attempt and answer-disclosure policy; existing `1.0.0` payloads are accepted
+and upgraded with safe defaults as documented in `COURSE_SCHEMA_MIGRATION_1_1.md`.
 
 ## 7. SCORM
 

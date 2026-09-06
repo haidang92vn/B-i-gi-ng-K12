@@ -13,7 +13,7 @@ import zipfile
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 from openpyxl import Workbook
-from prototype.course_models import Block, Question, Slide, new_course
+from prototype.course_models import Block, Course, Question, Slide, new_course
 from prototype.quiz_scoring import score_question
 from prototype.scorm_runtime import FakeScorm2004API, ScormRuntime
 from prototype.logging_config import redact
@@ -21,6 +21,8 @@ from prototype.onboarding import ProvisioningError, provision_school_admin
 from prototype.google_oauth import GoogleProfile, decode_attempt
 from prototype.persistence import database_url
 from prototype.quality import analyze_course
+from prototype.serverless_api import create_serverless_app
+from prototype.serverless_core import ScormRenderer, StatelessModeError, make_mock_course, package_course
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,10 +37,84 @@ def load_prototype():
 
 
 class CourseContractTests(unittest.TestCase):
+    @staticmethod
+    def stateless_renderer():
+        def manifest(title: str):
+            return f'<?xml version="1.0"?><manifest><title>{title}</title><resource href="index.html"/></manifest>'
+
+        def validate_files(files: dict[str, bytes], passing_score: int, completion_percent: int):
+            if set(files) != {"imsmanifest.xml", "index.html", "runtime.js"}:
+                return ["Unexpected stateless file map."]
+            if not 0 <= passing_score <= 100 or not 0 <= completion_percent <= 100:
+                return ["Invalid completion policy."]
+            return []
+
+        def validate_zip(package: bytes):
+            with zipfile.ZipFile(io.BytesIO(package)) as archive:
+                return [] if "imsmanifest.xml" in archive.namelist() else ["Root manifest is missing."]
+
+        return ScormRenderer(
+            to_export_request=lambda course: course,
+            render_html=lambda course: '<html><script src="runtime.js"></script></html>',
+            runtime=lambda: "const API_1484_11 = {};",
+            manifest=manifest,
+            validate_files=validate_files,
+            validate_zip=validate_zip,
+        )
+
+    def test_stateless_core_generates_valid_course_and_never_writes_a_project(self):
+        course = make_mock_course({"title": "Vòng tuần hoàn của nước", "source": "Nước bốc hơi, ngưng tụ thành mây rồi tạo mưa.", "direction": "lesson"})
+        self.assertEqual(course.metadata.title, "Vòng tuần hoàn của nước")
+        self.assertEqual(len(course.slides), 4)
+        self.assertEqual(len(course.question_bank), 8)
+        self.assertTrue(all(question.objective_ids for question in course.question_bank))
+        package, filename = package_course(course, self.stateless_renderer())
+        self.assertTrue(filename.endswith("_SCORM2004.zip"))
+        with zipfile.ZipFile(io.BytesIO(package)) as archive:
+            self.assertEqual(set(archive.namelist()), {"imsmanifest.xml", "index.html", "runtime.js"})
+
+    def test_stateless_core_rejects_assets_and_oversized_zip_before_download(self):
+        course = make_mock_course({"title": "Giới hạn", "source": "Nội dung kiểm tra đầy đủ cho chế độ serverless.", "direction": "lesson"})
+        course.slides[0].blocks.append(Block(id="asset", type="image", asset_id="media-1"))
+        with self.assertRaises(StatelessModeError):
+            package_course(course, self.stateless_renderer())
+        course.slides[0].blocks.pop()
+        with self.assertRaises(StatelessModeError):
+            package_course(course, self.stateless_renderer(), max_bytes=1)
+
+    def test_stateless_fastapi_factory_accepts_canonical_course_without_auth_or_database(self):
+        client = TestClient(create_serverless_app(self.stateless_renderer()))
+        generated = client.post("/api/serverless/generate", json={"title": "Bài tạm", "source": "Nguồn bài học đủ dài để Mock AI tạo nội dung.", "direction": "review"})
+        self.assertEqual(generated.status_code, 200, generated.text)
+        course = generated.json()["course"]
+        quality = client.post("/api/serverless/quality", json=course)
+        self.assertEqual(quality.status_code, 200, quality.text)
+        preview = client.post("/api/serverless/preview", json=course)
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertIn("runtime.js", preview.text)
+        exported = client.post("/api/serverless/export", json={"course": course})
+        self.assertEqual(exported.status_code, 200, exported.text)
+        self.assertEqual(exported.headers["content-type"], "application/zip")
+
     def test_example_matches_json_schema(self):
         schema = json.loads((ROOT / "schemas/course.schema.json").read_text(encoding="utf-8"))
         example = json.loads((ROOT / "examples/course.example.json").read_text(encoding="utf-8"))
         Draft202012Validator(schema).validate(example)
+
+    def test_course_1_0_is_migrated_to_quiz_policy_1_1_defaults(self):
+        legacy = new_course("Bài cũ").model_dump(mode="json")
+        legacy["schema_version"] = "1.0.0"
+        for key in ("max_attempts", "show_feedback", "show_correct_answer"):
+            legacy["completion"].pop(key, None)
+        migrated = Course.model_validate(legacy)
+        self.assertEqual(migrated.schema_version, "1.1.0")
+        self.assertIsNone(migrated.completion.max_attempts)
+        self.assertTrue(migrated.completion.show_feedback)
+        self.assertFalse(migrated.completion.show_correct_answer)
+
+        legacy["completion"]["max_attempts"] = 0
+        with self.assertRaises(ValueError):
+            Course.model_validate(legacy)
 
     def test_quiz_scoring_is_deterministic(self):
         def question(kind, correct):
@@ -674,6 +750,98 @@ class PrototypeTests(unittest.TestCase):
             with self.module.SessionLocal() as db:
                 identities = db.scalars(self.module.select(self.module.OAuthIdentity).where(self.module.OAuthIdentity.provider == "google", self.module.OAuthIdentity.subject == subject)).all()
                 self.assertEqual(len(identities), 1)
+
+    def test_scorm_export_job_records_a_revision_pinned_redis_request(self):
+        client = TestClient(self.module.app)
+        registered = client.post("/api/v1/auth/register", json={"email": f"export-job-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        self.assertEqual(registered.status_code, 201, registered.text)
+        project = client.post("/api/v1/projects", json={"title": "Xuất nền", "direction": "lesson"})
+        self.assertEqual(project.status_code, 201, project.text)
+
+        queued_ids: list[str] = []
+        with patch.object(self.module, "enqueue_export_job", side_effect=queued_ids.append):
+            queued = client.post(f"/api/v1/projects/{project.json()['id']}/exports/scorm2004/jobs")
+        self.assertEqual(queued.status_code, 202, queued.text)
+        payload = queued.json()
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(payload["input_revision"], 1)
+        self.assertEqual(queued_ids, [payload["id"]])
+        self.assertNotIn(project.json()["course"]["metadata"]["title"], str(queued_ids))
+
+        status_response = client.get(f"/api/v1/export-jobs/{payload['id']}")
+        self.assertEqual(status_response.status_code, 200, status_response.text)
+        self.assertEqual(status_response.json()["id"], payload["id"])
+        outsider = TestClient(self.module.app)
+        outsider.post("/api/v1/auth/register", json={"email": f"export-job-outsider-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        self.assertEqual(outsider.get(f"/api/v1/export-jobs/{payload['id']}").status_code, 404)
+
+    def test_scorm_export_job_fails_safely_when_redis_is_unavailable(self):
+        client = TestClient(self.module.app)
+        client.post("/api/v1/auth/register", json={"email": f"export-queue-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        project = client.post("/api/v1/projects", json={"title": "Hàng đợi lỗi", "direction": "lesson"}).json()
+        with patch.object(self.module, "enqueue_export_job", side_effect=self.module.QueueUnavailable("do not expose redis details")):
+            response = client.post(f"/api/v1/projects/{project['id']}/exports/scorm2004/jobs")
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "EXPORT_QUEUE_UNAVAILABLE")
+        self.assertNotIn("redis details", response.text)
+
+    def test_export_worker_builds_a_ready_scorm_record_from_the_pinned_revision(self):
+        from prototype.worker import process_export_job
+
+        client = TestClient(self.module.app)
+        email = f"export-worker-{uuid4()}@example.test"
+        registered = client.post("/api/v1/auth/register", json={"email": email, "password": "a-secure-test-password"})
+        self.assertEqual(registered.status_code, 201, registered.text)
+        project = client.post("/api/v1/projects", json={"title": "Worker SCORM", "direction": "lesson"}).json()
+        with self.module.SessionLocal() as db:
+            user = db.scalar(self.module.select(self.module.User).where(self.module.User.email == email))
+            job = self.module.ExportJob(project_id=project["id"], user_id=user.id, input_revision=project["revision"])
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        process_export_job(job_id, runtime_module=self.module)
+
+        with self.module.SessionLocal() as db:
+            completed = db.get(self.module.ExportJob, job_id)
+            self.assertEqual(completed.status, "ready")
+            self.assertIsNotNone(completed.export_record_id)
+            self.assertIsNotNone(completed.finished_at)
+            record = db.get(self.module.ExportRecord, completed.export_record_id)
+            self.assertIsNotNone(record)
+            self.assertTrue(record.filename.endswith("_SCORM2004.zip"))
+            export_id = completed.export_record_id
+
+        download = client.get(f"/api/v1/exports/{export_id}/content")
+        self.assertEqual(download.status_code, 200, download.text)
+        self.assertEqual(download.headers["content-type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(download.content)) as package:
+            self.assertIn("imsmanifest.xml", package.namelist())
+        outsider = TestClient(self.module.app)
+        outsider.post("/api/v1/auth/register", json={"email": f"export-download-outsider-{uuid4()}@example.test", "password": "a-secure-test-password"})
+        self.assertEqual(outsider.get(f"/api/v1/exports/{export_id}/content").status_code, 404)
+
+    def test_export_worker_rejects_a_course_changed_after_queueing(self):
+        from prototype.worker import process_export_job
+
+        client = TestClient(self.module.app)
+        email = f"export-revision-{uuid4()}@example.test"
+        client.post("/api/v1/auth/register", json={"email": email, "password": "a-secure-test-password"})
+        project = client.post("/api/v1/projects", json={"title": "Revision guard", "direction": "lesson"}).json()
+        with self.module.SessionLocal() as db:
+            user = db.scalar(self.module.select(self.module.User).where(self.module.User.email == email))
+            job = self.module.ExportJob(project_id=project["id"], user_id=user.id, input_revision=project["revision"] - 1)
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        process_export_job(job_id, runtime_module=self.module)
+
+        with self.module.SessionLocal() as db:
+            failed = db.get(self.module.ExportJob, job_id)
+            self.assertEqual(failed.status, "failed")
+            self.assertEqual(failed.error_code, "COURSE_REVISION_CHANGED")
+            self.assertNotIn("Revision guard", failed.error_message_safe)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import type { CanonicalCourse, NavigationMode, ScormPreset } from "./api";
 
 export type LmsSettings = {
   navigation: { mode: NavigationMode; show_menu: boolean; show_progress: boolean };
-  completion: { viewed_percent: number; passing_score: number; require_quiz: boolean };
+  completion: { viewed_percent: number; passing_score: number; require_quiz: boolean; max_attempts: number | null; show_feedback: boolean; show_correct_answer: boolean };
   scorm: {
     standard: "SCORM_2004";
     edition: string | null;
@@ -16,7 +16,7 @@ export type LmsSettings = {
 
 export const k12OnlinePreset: LmsSettings = {
   navigation: { mode: "free", show_menu: true, show_progress: true },
-  completion: { viewed_percent: 90, passing_score: 70, require_quiz: true },
+  completion: { viewed_percent: 90, passing_score: 70, require_quiz: true, max_attempts: null, show_feedback: true, show_correct_answer: false },
   scorm: {
     standard: "SCORM_2004",
     edition: "4th Edition",
@@ -39,6 +39,7 @@ export function settingsFromCourse(course: CanonicalCourse): LmsSettings {
 export function applyLmsSettings(course: CanonicalCourse, settings: LmsSettings): CanonicalCourse {
   return {
     ...course,
+    schema_version: "1.1.0",
     navigation: { ...settings.navigation },
     completion: { ...settings.completion },
     scorm: { ...settings.scorm },
@@ -52,6 +53,7 @@ export function lmsWarnings(settings: LmsSettings, selectedQuizCount: number): s
   if (!settings.scorm.track_score) warnings.push("LMS sẽ không nhận điểm số dù người học vẫn thấy kết quả trong player.");
   if (!settings.scorm.track_success) warnings.push("LMS sẽ không nhận trạng thái đạt hoặc chưa đạt.");
   if (!settings.navigation.show_menu && settings.navigation.mode === "free") warnings.push("Điều hướng tự do nhưng menu đang ẩn; người học chỉ có thể dùng nút Trước/Tiếp.");
+  if (settings.completion.show_correct_answer && !settings.completion.show_feedback) warnings.push("Đang bật hiện đáp án đúng nhưng phản hồi sau khi nộp đang bị ẩn.");
   return warnings;
 }
 

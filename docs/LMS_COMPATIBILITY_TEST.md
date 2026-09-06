@@ -20,3 +20,5 @@ Record failures, LMS messages and a recovery test before marking the preset comp
 | Date | Scope | Automated package validation | K12Online tenant test | Result |
 |---|---|---|---|---|
 | 2026-09-02 | Player, runtime, advanced quiz, canonical LMS settings and ZIP validator | 33 tests passed; final ZIP readability/root/path checks enabled | Not run — no approved tenant/course and export ID supplied | Static validation passed; K12Online compatibility remains unverified |
+| 2026-09-03 | Stateless ZIP runtime, resume and basic scored quiz | Python package contract plus Chromium LMS simulator: Initialize/GetValue/SetValue/Commit/suspend data/session time/Terminate passed | Not run — anh does not have a K12Online tenant | Equivalent SCORM 2004 runtime check passed; K12Online compatibility remains unverified |
+| 2026-09-04 | Serverless advanced interactions | Python export contract and Chromium simulator: matching, ordering, drag-drop and HTTPS image-choice scored 100% and wrote passed/completed | Not run — anh does not have a K12Online tenant | Equivalent interaction check passed; external-image policy and K12Online compatibility remain unverified |

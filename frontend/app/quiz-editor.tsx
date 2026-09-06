@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getProject, updateCanonicalCourse, type CanonicalCourse, type CourseQuestion, type Project, type QuestionDifficulty, type QuestionType } from "@/lib/api";
+import { type CanonicalCourse, type CourseQuestion, type Project, type QuestionDifficulty, type QuestionType } from "@/lib/api";
+import { getLocalProject as getProject, updateLocalCanonicalCourse as updateCanonicalCourse } from "@/lib/local-workspace";
 import { answerToEditorText, imageOptionsToEditorText, parseEditorAnswer, parseImageOptions, questionWarnings } from "@/lib/quiz";
+import { consumeQualityFocus } from "@/lib/export";
 
 type SaveTone = "idle" | "loading" | "saved" | "error";
 type QuestionFilter = "all" | "selected" | "unselected";
@@ -45,7 +47,7 @@ function normalizeAnswer(question: CourseQuestion, type: QuestionType): unknown 
 export default function QuizEditor({ project, onProjectChange, onSaveState }: QuizEditorProps) {
   const [course, setCourse] = useState<CanonicalCourse>(() => cloneCourse(project.course));
   const [serverProject, setServerProject] = useState(project);
-  const [selectedQuestionId, setSelectedQuestionId] = useState(project.course.question_bank[0]?.id ?? "");
+  const [selectedQuestionId, setSelectedQuestionId] = useState(() => consumeQualityFocus("question", project.course.question_bank.map((question) => question.id)) ?? project.course.question_bank[0]?.id ?? "");
   const [filter, setFilter] = useState<QuestionFilter>("all");
   const [editVersion, setEditVersion] = useState(0);
   const [savedVersion, setSavedVersion] = useState(0);
@@ -236,7 +238,7 @@ export default function QuizEditor({ project, onProjectChange, onSaveState }: Qu
             <div className="question-fields">
               <label>Nội dung câu hỏi<textarea rows={3} disabled={!canEdit} value={selectedQuestion.question} onChange={(event) => updateQuestion(selectedQuestion.id, (question) => { question.question = event.target.value; })} /></label>
               {!["fill", "truefalse", "image"].includes(selectedQuestion.type) && <label>Phương án <small>Mỗi dòng một phương án.</small><textarea rows={4} disabled={!canEdit} value={optionDrafts[selectedQuestion.id] ?? selectedQuestion.options.join("\n")} onChange={(event) => { const value = event.target.value; setOptionDrafts((current) => ({ ...current, [selectedQuestion.id]: value })); updateQuestion(selectedQuestion.id, (question) => { question.options = value.split("\n").map((item) => item.trim()).filter(Boolean); }); }} /></label>}
-              {selectedQuestion.type === "image" && <label>Ảnh lựa chọn <small>Mỗi dòng: mã lựa chọn | mã asset ảnh | nhãn.</small><textarea rows={4} disabled={!canEdit} placeholder="img-1 | asset-id | Hình tam giác" value={imageDrafts[selectedQuestion.id] ?? imageOptionsToEditorText(selectedQuestion.settings)} onChange={(event) => { const value = event.target.value; setImageDrafts((current) => ({ ...current, [selectedQuestion.id]: value })); updateQuestion(selectedQuestion.id, (question) => { const imageOptions = parseImageOptions(value); question.settings = { ...question.settings, image_options: imageOptions }; question.options = imageOptions.map((item) => item.id); }); }} /></label>}
+              {selectedQuestion.type === "image" && <><label>Ảnh lựa chọn <small>Mỗi dòng: mã lựa chọn | mã asset hoặc URL HTTPS | nhãn. Serverless chỉ xuất được URL HTTPS.</small><textarea rows={4} disabled={!canEdit} placeholder="img-1 | https://example.edu.vn/tam-giac.png | Hình tam giác" value={imageDrafts[selectedQuestion.id] ?? imageOptionsToEditorText(selectedQuestion.settings)} onChange={(event) => { const value = event.target.value; setImageDrafts((current) => ({ ...current, [selectedQuestion.id]: value })); updateQuestion(selectedQuestion.id, (question) => { const imageOptions = parseImageOptions(value); question.settings = { ...question.settings, image_options: imageOptions }; question.options = imageOptions.map((item) => item.id); }); }} /></label><label className="external-media-rights"><input type="checkbox" disabled={!canEdit} checked={selectedQuestion.settings.external_media_rights_confirmed === true} onChange={(event) => updateQuestion(selectedQuestion.id, (question) => { question.settings = { ...question.settings, external_media_rights_confirmed: event.target.checked }; })} /> Tôi xác nhận có quyền sử dụng các ảnh URL bên ngoài.</label></>}
               <label>Đáp án đúng <small>{selectedQuestion.type === "matching" ? "Mỗi dòng: vế trái => vế phải." : ["multiple", "ordering", "dragdrop"].includes(selectedQuestion.type) ? "Mỗi dòng một giá trị; thứ tự được giữ với dạng sắp xếp/kéo thả." : "Nhập đúng giá trị hệ thống sẽ so khớp."}</small><textarea rows={3} disabled={!canEdit} value={answerDrafts[selectedQuestion.id] ?? answerToEditorText(selectedQuestion.correct_answer, selectedQuestion.type)} onChange={(event) => { const value = event.target.value; setAnswerDrafts((current) => ({ ...current, [selectedQuestion.id]: value })); updateQuestion(selectedQuestion.id, (question) => { question.correct_answer = parseEditorAnswer(value, question.type); }); }} /></label>
 
               <fieldset className="question-objectives" disabled={!canEdit}><legend>Liên kết mục tiêu học tập</legend>{course.objectives.map((objective) => <label key={objective.id}><input type="checkbox" checked={selectedQuestion.objective_ids.includes(objective.id)} onChange={(event) => updateQuestion(selectedQuestion.id, (question) => { question.objective_ids = event.target.checked ? [...new Set([...question.objective_ids, objective.id])] : question.objective_ids.filter((id) => id !== objective.id); })} />{objective.text}</label>)}{course.objectives.length === 0 && <p>Chưa có mục tiêu để liên kết.</p>}</fieldset>

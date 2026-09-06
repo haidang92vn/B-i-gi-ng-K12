@@ -132,11 +132,22 @@ Preview may return a temporary render id/url but must render from the current ca
 
 ## SCORM export
 ```text
-POST /api/v1/projects/{project_id}/exports/scorm2004
-GET  /api/v1/projects/{project_id}/exports
-GET  /api/v1/exports/{export_id}
-GET  /api/v1/exports/{export_id}/download
+POST /api/export-scorm
+POST /api/v1/projects/{project_id}/exports/scorm2004/jobs
+GET  /api/v1/export-jobs/{job_id}
+GET  /api/v1/exports
+GET  /api/v1/exports/{export_id}/content
 ```
+
+`POST /api/export-scorm` remains the direct-download path for small interactive exports.
+`POST /api/v1/projects/{project_id}/exports/scorm2004/jobs` returns `202` and a revision-pinned
+job. Redis receives only the opaque job id; the worker builds from the canonical project in
+PostgreSQL and stores the resulting ZIP through the normal private object-storage boundary.
+Only the teacher who requested a job can poll it. A `failed` job exposes a safe code/message, not
+Redis, object-storage or provider details.
+When the job is `ready`, its `export_id` can be downloaded through the private content route;
+the route verifies the export owner and ready state before reading from object storage. It never
+returns an R2 key or a public bucket URL.
 
 The export endpoint validates a specific project revision and stores the revision number with the export.
 

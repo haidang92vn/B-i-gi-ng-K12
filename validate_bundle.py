@@ -97,6 +97,21 @@ def load_json(path: str) -> dict:
         raise AssertionError("unreachable")
 
 
+def supported_schema_versions(schema: dict) -> list[str]:
+    """Return schema versions supported by either a const or enum contract."""
+    version_schema = schema.get("properties", {}).get("schema_version", {})
+    constant = version_schema.get("const")
+    if isinstance(constant, str):
+        return [constant]
+
+    versions = version_schema.get("enum")
+    if isinstance(versions, list) and versions and all(isinstance(item, str) for item in versions):
+        return versions
+
+    fail("schema_version must define a string const or a non-empty string enum")
+    raise AssertionError("unreachable")
+
+
 def check_course_contract() -> None:
     schema = load_json("schemas/course.schema.json")
     course = load_json("examples/course.example.json")
@@ -109,8 +124,9 @@ def check_course_contract() -> None:
         )
         fail(f"course.example.json does not match schema: {details}")
 
-    if schema["properties"]["schema_version"].get("const") != course.get("schema_version"):
-        fail("schema_version constant does not match the example")
+    versions = supported_schema_versions(schema)
+    if course.get("schema_version") != versions[-1]:
+        fail("course example must use the latest supported schema_version")
     if course["scorm"]["standard"] != "SCORM_2004":
         fail("example course must target SCORM_2004")
     if course["scorm"]["preset"] != "k12online":

@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "id": "course_demo_001",
   "revision": 1,
   "metadata": {
@@ -47,6 +47,6 @@
   ],
   "theme": {"id": "default_light", "primary_color": null, "font_family": null, "logo_asset_id": null},
   "navigation": {"mode": "restricted", "show_menu": true, "show_progress": true},
-  "completion": {"viewed_percent": 90, "passing_score": 70, "require_quiz": true},
+  "completion": {"viewed_percent": 90, "passing_score": 70, "require_quiz": true, "max_attempts": null, "show_feedback": true, "show_correct_answer": false},
   "scorm": {"standard": "SCORM_2004", "edition": null, "preset": "k12online", "resume": true, "track_score": true, "track_completion": true, "track_success": true}
 }

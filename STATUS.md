@@ -33,10 +33,13 @@ contracts for the production architecture. It is **not yet the complete producti
 
 - Serverless preview and ZIP honor menu/progress visibility, free/sequential/restricted
   navigation, responsive two-column/callout layouts and safe theme accents. Progress counts
-  distinct visited slides instead of the furthest slide. Verification: 51 Python tests,
+  distinct visited slides instead of the furthest slide. Verification: 54 Python tests,
   21 Chromium tests, 37 frontend unit tests and TypeScript checks pass locally. The serverless API
   and frontend were deployed to their production aliases on 2026-09-06, followed by a successful
   public Mock AI → preview → quality check → SCORM ZIP smoke test.
+
+- Repository validation supports both the legacy single-version `const` contract and the current
+  ordered `schema_version` migration `enum`; the example course must use the newest listed version.
 
 - Serverless preview embeds packaged runtime/player scripts for sandbox operation. Export and
   preview reject empty slide lists and invalid selected quiz configurations; generated HTML and
